@@ -37,9 +37,42 @@ function resolveGitRoot(fallbackDir) {
   return fallbackDir;
 }
 
+const openAICompatibleProviderPresets = {
+  custom: {
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+    apiKeyEnvName: "OPENAI_COMPAT_API_KEY"
+  },
+  xingwan: {
+    baseUrl: "https://xingwan.store/v1",
+    model: "gpt-5.4-mini",
+    apiKeyEnvName: "XINGWAN_API_KEY"
+  },
+  qhaigc: {
+    baseUrl: "https://api.qhaigc.net/v1",
+    model: "deepseek-chat",
+    apiKeyEnvName: "QHAIGC_API_KEY"
+  }
+};
+
+function resolveOpenAICompatibleProvider(env) {
+  const provider = env.OPENAI_COMPAT_PROVIDER || "custom";
+  const preset = openAICompatibleProviderPresets[provider] || openAICompatibleProviderPresets.custom;
+  const providerApiKey = env[preset.apiKeyEnvName] || "";
+
+  return {
+    provider,
+    baseUrl: env.OPENAI_COMPAT_BASE_URL || preset.baseUrl,
+    model: env.OPENAI_COMPAT_MODEL || preset.model,
+    apiKey: env.OPENAI_COMPAT_API_KEY || providerApiKey,
+    apiKeyEnvName: preset.apiKeyEnvName
+  };
+}
+
 export function loadConfig(env = process.env) {
   const launchDir = process.cwd();
   const defaultCodexWorkdir = resolveGitRoot(launchDir);
+  const openAICompatibleProvider = resolveOpenAICompatibleProvider(env);
 
   return {
     port: parseNumber(env.PORT, 3000),
@@ -58,6 +91,16 @@ export function loadConfig(env = process.env) {
     codexHttpTimeoutMs: parseNumber(env.CODEX_HTTP_TIMEOUT_MS, 10 * 60 * 1000),
     codexHttpAuthHeader: env.CODEX_HTTP_AUTH_HEADER || "",
     codexHttpAuthToken: env.CODEX_HTTP_AUTH_TOKEN || "",
+    openaiCompatProvider: openAICompatibleProvider.provider,
+    openaiCompatApiKey: openAICompatibleProvider.apiKey,
+    openaiCompatApiKeyEnvName: openAICompatibleProvider.apiKeyEnvName,
+    openaiCompatBaseUrl: openAICompatibleProvider.baseUrl,
+    openaiCompatChatCompletionsUrl: env.OPENAI_COMPAT_CHAT_COMPLETIONS_URL || "",
+    openaiCompatModel: openAICompatibleProvider.model,
+    openaiCompatSystemPrompt: env.OPENAI_COMPAT_SYSTEM_PROMPT || "You are a concise assistant replying to Feishu messages.",
+    openaiCompatTemperature: parseNumber(env.OPENAI_COMPAT_TEMPERATURE, 0.2),
+    openaiCompatMaxTokens: parseNumber(env.OPENAI_COMPAT_MAX_TOKENS, 2000),
+    openaiCompatTimeoutMs: parseNumber(env.OPENAI_COMPAT_TIMEOUT_MS, 2 * 60 * 1000),
     codexCliCommand: env.CODEX_CLI_COMMAND || "codex",
     codexCliArgs: parseList(env.CODEX_CLI_ARGS),
     codexCliTimeoutMs: parseNumber(env.CODEX_CLI_TIMEOUT_MS, 10 * 60 * 1000),

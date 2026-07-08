@@ -8,6 +8,7 @@ import {
   verifyFeishuToken
 } from "../src/feishu.mjs";
 import { processFeishuTextEvent } from "../src/bridge.mjs";
+import { runCodex } from "../src/codex-adapter.mjs";
 
 test("loadConfig parses lists and booleans", () => {
   const config = loadConfig({
@@ -17,6 +18,8 @@ test("loadConfig parses lists and booleans", () => {
     FEISHU_REPLY_FORMAT: "card",
     FEISHU_TRIGGER_MODE: "mention_or_prefix",
     MOCK_FEISHU_SEND: "true",
+    OPENAI_COMPAT_PROVIDER: "qhaigc",
+    QHAIGC_API_KEY: "qhaigc-test-key",
     CODEX_EXEC_WORKDIR: "/tmp/project",
     CODEX_CLI_ARGS: "--json,--quiet",
     CODEX_EXEC_ARGS: "exec,--skip-git-repo-check,--dangerously-bypass-approvals-and-sandbox"
@@ -28,6 +31,11 @@ test("loadConfig parses lists and booleans", () => {
   assert.equal(config.feishuReplyFormat, "card");
   assert.equal(config.feishuTriggerMode, "mention_or_prefix");
   assert.equal(config.mockFeishuSend, true);
+  assert.equal(config.openaiCompatProvider, "qhaigc");
+  assert.equal(config.openaiCompatApiKey, "qhaigc-test-key");
+  assert.equal(config.openaiCompatApiKeyEnvName, "QHAIGC_API_KEY");
+  assert.equal(config.openaiCompatBaseUrl, "https://api.qhaigc.net/v1");
+  assert.equal(config.openaiCompatModel, "deepseek-chat");
   assert.deepEqual(config.codexCliArgs, ["--json", "--quiet"]);
   assert.deepEqual(config.codexExecArgs, [
     "exec",
@@ -196,4 +204,73 @@ test("buildFeishuMessagePayload sends card replies by default", () => {
   assert.equal(card.header.title.content, "Codex");
   assert.equal(card.elements[0].tag, "markdown");
   assert.equal(card.elements[0].content, "**Summary**\n- one");
+});
+
+test("runCodex supports OpenAI-compatible chat completions", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+
+    return new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: "provider reply"
+          }
+        }
+      ]
+    }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
+  };
+
+  try {
+    const result = await runCodex(
+      loadConfig({
+        CODEX_MODE: "openai_compatible",
+        OPENAI_COMPAT_PROVIDER: "xingwan",
+        XINGWAN_API_KEY: "test-key",
+        OPENAI_COMPAT_SYSTEM_PROMPT: "system prompt"
+      }),
+      "hello provider",
+      {
+        chatId: "oc_test",
+        messageId: "om_test"
+      }
+    );
+
+    const request = calls[0];
+    const body = JSON.parse(request.options.body);
+
+    assert.equal(result, "provider reply");
+    assert.equal(request.url, "https://xingwan.store/v1/chat/completions");
+    assert.equal(request.options.headers.Authorization, "Bearer test-key");
+    assert.equal(body.model, "gpt-5.4-mini");
+    assert.deepEqual(body.messages, [
+      { role: "system", content: "system prompt" },
+      { role: "user", content: "hello provider" }
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAI-compatible explicit config overrides provider preset", () => {
+  const config = loadConfig({
+    OPENAI_COMPAT_PROVIDER: "qhaigc",
+    QHAIGC_API_KEY: "qhaigc-test-key",
+    OPENAI_COMPAT_BASE_URL: "https://override.example/v1",
+    OPENAI_COMPAT_MODEL: "override-model",
+    OPENAI_COMPAT_API_KEY: "override-key"
+  });
+
+  assert.equal(config.openaiCompatProvider, "qhaigc");
+  assert.equal(config.openaiCompatBaseUrl, "https://override.example/v1");
+  assert.equal(config.openaiCompatModel, "override-model");
+  assert.equal(config.openaiCompatApiKey, "override-key");
 });

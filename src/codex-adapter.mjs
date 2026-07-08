@@ -15,6 +15,62 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 }
 
+function getOpenAICompatChatUrl(config) {
+  if (config.openaiCompatChatCompletionsUrl) {
+    return config.openaiCompatChatCompletionsUrl;
+  }
+
+  const baseUrl = config.openaiCompatBaseUrl.endsWith("/")
+    ? config.openaiCompatBaseUrl
+    : `${config.openaiCompatBaseUrl}/`;
+  return new URL("chat/completions", baseUrl).toString();
+}
+
+function extractTextContent(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
+
+        return part?.text || part?.content || "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return "";
+}
+
+function extractOpenAICompatReply(data) {
+  const firstChoice = data?.choices?.[0];
+  const messageContent = extractTextContent(firstChoice?.message?.content);
+
+  if (messageContent) {
+    return messageContent;
+  }
+
+  if (firstChoice?.text) {
+    return firstChoice.text;
+  }
+
+  if (data?.output_text) {
+    return data.output_text;
+  }
+
+  throw new Error(`OpenAI-compatible response did not include assistant text: ${JSON.stringify(data).slice(0, 1000)}`);
+}
+
+function truncateErrorBody(body) {
+  const text = String(body || "");
+  return text.length > 1500 ? `${text.slice(0, 1500)}...` : text;
+}
+
 async function invokeHttp(config, prompt, context) {
   if (!config.codexHttpUrl) {
     throw new Error("Missing CODEX_HTTP_URL for CODEX_MODE=http");
@@ -52,6 +108,56 @@ async function invokeHttp(config, prompt, context) {
   });
 
   return withTimeout(request, config.codexHttpTimeoutMs, "Codex HTTP request");
+}
+
+async function invokeOpenAICompatible(config, prompt, context) {
+  if (!config.openaiCompatApiKey) {
+    throw new Error("Missing OPENAI_COMPAT_API_KEY for CODEX_MODE=openai_compatible");
+  }
+
+  if (!config.openaiCompatModel) {
+    throw new Error("Missing OPENAI_COMPAT_MODEL for CODEX_MODE=openai_compatible");
+  }
+
+  const request = fetch(getOpenAICompatChatUrl(config), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.openaiCompatApiKey}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({
+      model: config.openaiCompatModel,
+      messages: [
+        {
+          role: "system",
+          content: config.openaiCompatSystemPrompt
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: config.openaiCompatTemperature,
+      max_tokens: config.openaiCompatMaxTokens
+    })
+  }).then(async (response) => {
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`OpenAI-compatible API error ${response.status}: ${truncateErrorBody(text)}`);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`OpenAI-compatible API returned non-JSON response: ${truncateErrorBody(text)}`);
+    }
+
+    return extractOpenAICompatReply(data);
+  });
+
+  return withTimeout(request, config.openaiCompatTimeoutMs, "OpenAI-compatible API request");
 }
 
 async function invokeCli(config, prompt) {
@@ -153,6 +259,10 @@ export async function runCodex(config, prompt, context) {
 
   if (config.codexMode === "http") {
     return invokeHttp(config, prompt, context);
+  }
+
+  if (config.codexMode === "openai_compatible") {
+    return invokeOpenAICompatible(config, prompt, context);
   }
 
   throw new Error(`Unsupported CODEX_MODE: ${config.codexMode}`);

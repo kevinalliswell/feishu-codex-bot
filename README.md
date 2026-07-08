@@ -10,8 +10,9 @@
 - 支持按 `chat_id` 白名单限制触发范围
 - 支持私聊直接触发、群聊 `@机器人` 触发，以及 `/codex` 显式命令
 - 默认用飞书互动卡片回发 Codex 结果
-- 支持 4 种 Codex 适配模式：
+- 支持 5 种 Codex 适配模式：
   - `http`: 转发到本地 HTTP 服务
+  - `openai_compatible`: 调用 OpenAI-compatible Chat Completions API
   - `cli`: 通过标准输入调用本地 CLI
   - `codex_exec`: 原生调用 `codex exec`
   - `mock`: 本地联调
@@ -58,6 +59,66 @@ COMMAND_PREFIX=/codex
 CODEX_MODE=http
 CODEX_HTTP_URL=http://127.0.0.1:4000/run
 ```
+
+如果你想走第三方 OpenAI-compatible API：
+
+```env
+CODEX_MODE=openai_compatible
+OPENAI_COMPAT_PROVIDER=qhaigc
+QHAIGC_API_KEY=sk_xxx
+OPENAI_COMPAT_TEMPERATURE=0.2
+OPENAI_COMPAT_MAX_TOKENS=2000
+```
+
+内置供应商预设：
+
+```env
+# Xingwan: https://xingwan.store/v1, 默认模型 gpt-5.4-mini
+OPENAI_COMPAT_PROVIDER=xingwan
+XINGWAN_API_KEY=sk_xxx
+```
+
+```env
+# QHAIGC: https://api.qhaigc.net/v1, 默认模型 deepseek-chat
+OPENAI_COMPAT_PROVIDER=qhaigc
+QHAIGC_API_KEY=sk_xxx
+```
+
+切回本地 Codex CLI：
+
+```env
+CODEX_MODE=codex_exec
+```
+
+切换到第三方供应商：
+
+```env
+CODEX_MODE=openai_compatible
+OPENAI_COMPAT_PROVIDER=xingwan
+```
+
+或者：
+
+```env
+CODEX_MODE=openai_compatible
+OPENAI_COMPAT_PROVIDER=qhaigc
+```
+
+切换后重启服务：
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.kevin.feishu-codex
+```
+
+如果供应商的完整接口不是 `BASE_URL/chat/completions`，或你想覆盖默认模型，可以直接设置：
+
+```env
+OPENAI_COMPAT_BASE_URL=https://example.com/v1
+OPENAI_COMPAT_CHAT_COMPLETIONS_URL=https://example.com/custom/chat/completions
+OPENAI_COMPAT_MODEL=your-model
+```
+
+注意：`openai_compatible` 模式适合普通问答、总结、生成文本。它不会像本地 `codex_exec` 一样直接读写本地仓库或执行 shell 命令。
 
 3. 启动服务
 
