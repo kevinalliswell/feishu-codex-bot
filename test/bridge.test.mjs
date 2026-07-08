@@ -9,6 +9,7 @@ import {
 } from "../src/feishu.mjs";
 import { processFeishuTextEvent } from "../src/bridge.mjs";
 import { runCodex } from "../src/codex-adapter.mjs";
+import { generateImage } from "../src/image-adapter.mjs";
 
 test("loadConfig parses lists and booleans", () => {
   const config = loadConfig({
@@ -20,6 +21,8 @@ test("loadConfig parses lists and booleans", () => {
     MOCK_FEISHU_SEND: "true",
     OPENAI_COMPAT_PROVIDER: "qhaigc",
     QHAIGC_API_KEY: "qhaigc-test-key",
+    XINGWAN_API_KEY: "xingwan-test-key",
+    IMAGE_GENERATION_PROVIDER: "xingwan",
     CODEX_EXEC_WORKDIR: "/tmp/project",
     CODEX_CLI_ARGS: "--json,--quiet",
     CODEX_EXEC_ARGS: "exec,--skip-git-repo-check,--dangerously-bypass-approvals-and-sandbox"
@@ -36,6 +39,11 @@ test("loadConfig parses lists and booleans", () => {
   assert.equal(config.openaiCompatApiKeyEnvName, "QHAIGC_API_KEY");
   assert.equal(config.openaiCompatBaseUrl, "https://api.qhaigc.net/v1");
   assert.equal(config.openaiCompatModel, "deepseek-chat");
+  assert.equal(config.imageGenerationProvider, "xingwan");
+  assert.equal(config.imageGenerationApiKey, "xingwan-test-key");
+  assert.equal(config.imageGenerationApiKeyEnvName, "XINGWAN_API_KEY");
+  assert.equal(config.imageGenerationBaseUrl, "https://xingwan.store/v1");
+  assert.equal(config.imageGenerationModel, "gpt-image-2");
   assert.deepEqual(config.codexCliArgs, ["--json", "--quiet"]);
   assert.deepEqual(config.codexExecArgs, [
     "exec",
@@ -273,4 +281,98 @@ test("OpenAI-compatible explicit config overrides provider preset", () => {
   assert.equal(config.openaiCompatBaseUrl, "https://override.example/v1");
   assert.equal(config.openaiCompatModel, "override-model");
   assert.equal(config.openaiCompatApiKey, "override-key");
+});
+
+test("generateImage supports Xingwan b64 image responses", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const imageBytes = Buffer.from("fake-image");
+
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+
+    return new Response(JSON.stringify({
+      output_format: "png",
+      data: [
+        {
+          b64_json: imageBytes.toString("base64"),
+          revised_prompt: "revised prompt"
+        }
+      ]
+    }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
+  };
+
+  try {
+    const image = await generateImage(
+      loadConfig({
+        IMAGE_GENERATION_PROVIDER: "xingwan",
+        XINGWAN_API_KEY: "test-key"
+      }),
+      "画一张风景照"
+    );
+    const request = calls[0];
+    const body = JSON.parse(request.options.body);
+
+    assert.equal(request.url, "https://xingwan.store/v1/images/generations");
+    assert.equal(request.options.headers.Authorization, "Bearer test-key");
+    assert.equal(body.model, "gpt-image-2");
+    assert.equal(body.prompt, "画一张风景照");
+    assert.equal(body.size, "1024x1024");
+    assert.deepEqual(image.bytes, imageBytes);
+    assert.equal(image.mimeType, "image/png");
+    assert.equal(image.revisedPrompt, "revised prompt");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("processFeishuTextEvent routes image requests to image generation", async () => {
+  const originalFetch = globalThis.fetch;
+  const imageBytes = Buffer.from("fake-image");
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    output_format: "png",
+    data: [
+      {
+        b64_json: imageBytes.toString("base64")
+      }
+    ]
+  }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
+
+  try {
+    const result = await processFeishuTextEvent(
+      loadConfig({
+        MOCK_FEISHU_SEND: "true",
+        FEISHU_DELIVERY_MODE: "long_connection",
+        IMAGE_GENERATION_PROVIDER: "xingwan",
+        XINGWAN_API_KEY: "test-key"
+      }),
+      {
+        event_id: "evt_image_request",
+        event_type: "im.message.receive_v1",
+        message: {
+          message_id: "om_image_request",
+          chat_id: "oc_image_request",
+          chat_type: "p2p",
+          message_type: "text",
+          content: JSON.stringify({ text: "画一张清晨山湖风景照" })
+        }
+      }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.statusCode, 200);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

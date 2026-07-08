@@ -55,6 +55,19 @@ const openAICompatibleProviderPresets = {
   }
 };
 
+const imageGenerationProviderPresets = {
+  custom: {
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-image-2",
+    apiKeyEnvName: "IMAGE_GENERATION_API_KEY"
+  },
+  xingwan: {
+    baseUrl: "https://xingwan.store/v1",
+    model: "gpt-image-2",
+    apiKeyEnvName: "XINGWAN_API_KEY"
+  }
+};
+
 function resolveOpenAICompatibleProvider(env) {
   const provider = env.OPENAI_COMPAT_PROVIDER || "custom";
   const preset = openAICompatibleProviderPresets[provider] || openAICompatibleProviderPresets.custom;
@@ -69,10 +82,25 @@ function resolveOpenAICompatibleProvider(env) {
   };
 }
 
+function resolveImageGenerationProvider(env) {
+  const provider = env.IMAGE_GENERATION_PROVIDER || "xingwan";
+  const preset = imageGenerationProviderPresets[provider] || imageGenerationProviderPresets.custom;
+  const providerApiKey = env[preset.apiKeyEnvName] || "";
+
+  return {
+    provider,
+    baseUrl: env.IMAGE_GENERATION_BASE_URL || preset.baseUrl,
+    model: env.IMAGE_GENERATION_MODEL || preset.model,
+    apiKey: env.IMAGE_GENERATION_API_KEY || providerApiKey,
+    apiKeyEnvName: preset.apiKeyEnvName
+  };
+}
+
 export function loadConfig(env = process.env) {
   const launchDir = process.cwd();
   const defaultCodexWorkdir = resolveGitRoot(launchDir);
   const openAICompatibleProvider = resolveOpenAICompatibleProvider(env);
+  const imageGenerationProvider = resolveImageGenerationProvider(env);
 
   return {
     port: parseNumber(env.PORT, 3000),
@@ -101,6 +129,14 @@ export function loadConfig(env = process.env) {
     openaiCompatTemperature: parseNumber(env.OPENAI_COMPAT_TEMPERATURE, 0.2),
     openaiCompatMaxTokens: parseNumber(env.OPENAI_COMPAT_MAX_TOKENS, 2000),
     openaiCompatTimeoutMs: parseNumber(env.OPENAI_COMPAT_TIMEOUT_MS, 2 * 60 * 1000),
+    imageGenerationProvider: imageGenerationProvider.provider,
+    imageGenerationApiKey: imageGenerationProvider.apiKey,
+    imageGenerationApiKeyEnvName: imageGenerationProvider.apiKeyEnvName,
+    imageGenerationBaseUrl: imageGenerationProvider.baseUrl,
+    imageGenerationUrl: env.IMAGE_GENERATION_URL || "",
+    imageGenerationModel: imageGenerationProvider.model,
+    imageGenerationSize: env.IMAGE_GENERATION_SIZE || "1024x1024",
+    imageGenerationQuality: env.IMAGE_GENERATION_QUALITY || "",
     codexCliCommand: env.CODEX_CLI_COMMAND || "codex",
     codexCliArgs: parseList(env.CODEX_CLI_ARGS),
     codexCliTimeoutMs: parseNumber(env.CODEX_CLI_TIMEOUT_MS, 10 * 60 * 1000),

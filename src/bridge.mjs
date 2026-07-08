@@ -1,5 +1,12 @@
-import { extractTextMessage, sendFeishuTextMessage, verifyFeishuToken } from "./feishu.mjs";
+import {
+  extractTextMessage,
+  sendFeishuImageMessage,
+  sendFeishuTextMessage,
+  uploadFeishuImage,
+  verifyFeishuToken
+} from "./feishu.mjs";
 import { runCodex } from "./codex-adapter.mjs";
+import { generateImage } from "./image-adapter.mjs";
 
 const seenEventIds = new Map();
 
@@ -109,6 +116,27 @@ function formatErrorMessage(error) {
     "",
     String(error?.message || error)
   ].join("\n");
+}
+
+function extractImagePrompt(prompt) {
+  const trimmedPrompt = String(prompt || "").trim();
+
+  if (!trimmedPrompt) {
+    return { isImageRequest: false, prompt: "" };
+  }
+
+  const commandMatch = trimmedPrompt.match(/^\/(?:image|img|draw|画图|生图)\s+(.+)/i);
+  if (commandMatch) {
+    return { isImageRequest: true, prompt: commandMatch[1].trim() };
+  }
+
+  const imageIntentPattern = /(画|绘制|生成|做|设计).{0,12}(图|图片|照片|风景照|海报|插画|头像|壁纸|封面|图标|logo)/i;
+
+  if (imageIntentPattern.test(trimmedPrompt)) {
+    return { isImageRequest: true, prompt: trimmedPrompt };
+  }
+
+  return { isImageRequest: false, prompt: trimmedPrompt };
 }
 
 function summarizeText(text, maxLength = 160) {
@@ -233,13 +261,46 @@ export async function processFeishuTextEvent(config, payload) {
     return skip("prefix mismatch or empty prompt");
   }
 
-  logMessage("codex-start", {
-    ...buildMessageLogContext(textMessage),
-    codexMode: config.codexMode,
-    prompt: summarizeText(prompt)
-  });
-
   try {
+    const imageRequest = extractImagePrompt(prompt);
+
+    if (imageRequest.isImageRequest) {
+      logMessage("image-start", {
+        ...buildMessageLogContext(textMessage),
+        provider: config.imageGenerationProvider,
+        model: config.imageGenerationModel,
+        prompt: summarizeText(imageRequest.prompt)
+      });
+
+      const image = await generateImage(config, imageRequest.prompt);
+
+      logMessage("image-done", {
+        ...buildMessageLogContext(textMessage),
+        bytes: image.bytes.length,
+        mimeType: image.mimeType,
+        revisedPrompt: summarizeText(image.revisedPrompt)
+      });
+
+      const imageKey = await uploadFeishuImage(config, image);
+      const sendResult = await sendFeishuImageMessage(config, textMessage.chatId, imageKey);
+
+      logMessage("send-image-ok", {
+        ...buildMessageLogContext(textMessage),
+        feishuMessageId: sendResult?.message_id || sendResult?.data?.message_id || ""
+      });
+
+      return buildResult(true, 200, {
+        chatId: textMessage.chatId,
+        messageId: textMessage.messageId
+      });
+    }
+
+    logMessage("codex-start", {
+      ...buildMessageLogContext(textMessage),
+      codexMode: config.codexMode,
+      prompt: summarizeText(prompt)
+    });
+
     const output = await runCodex(config, prompt, textMessage);
     const replyText = String(output).trim() || "Codex returned empty output.";
 

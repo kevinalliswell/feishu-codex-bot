@@ -10,6 +10,7 @@
 - 支持按 `chat_id` 白名单限制触发范围
 - 支持私聊直接触发、群聊 `@机器人` 触发，以及 `/codex` 显式命令
 - 默认用飞书互动卡片回发 Codex 结果
+- 支持 Xingwan 图片生成并把图片发回飞书
 - 支持 5 种 Codex 适配模式：
   - `http`: 转发到本地 HTTP 服务
   - `openai_compatible`: 调用 OpenAI-compatible Chat Completions API
@@ -119,6 +120,31 @@ OPENAI_COMPAT_MODEL=your-model
 ```
 
 注意：`openai_compatible` 模式适合普通问答、总结、生成文本。它不会像本地 `codex_exec` 一样直接读写本地仓库或执行 shell 命令。
+
+图片生成走单独配置，默认使用 Xingwan 的 `gpt-image-2`：
+
+```env
+IMAGE_GENERATION_PROVIDER=xingwan
+XINGWAN_API_KEY=sk_xxx
+IMAGE_GENERATION_MODEL=gpt-image-2
+IMAGE_GENERATION_SIZE=1024x1024
+```
+
+如果想给图片生成单独使用另一把 key，也可以设置：
+
+```env
+IMAGE_GENERATION_API_KEY=sk_xxx
+```
+
+图片请求会自动识别这些表达：
+
+```text
+画一张清晨山湖风景照
+生成一张赛博朋克城市海报
+/image a cinematic mountain lake at sunrise
+```
+
+文字聊天和图片生成可以使用不同供应商。例如：`CODEX_MODE=openai_compatible` + `OPENAI_COMPAT_PROVIDER=qhaigc` 负责文字，`IMAGE_GENERATION_PROVIDER=xingwan` 负责生图。
 
 3. 启动服务
 

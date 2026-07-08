@@ -153,3 +153,70 @@ export async function sendFeishuTextMessage(config, chatId, text) {
 
   return data.data || data;
 }
+
+export async function uploadFeishuImage(config, image) {
+  if (config.mockFeishuSend) {
+    console.log(`[mock-feishu-upload-image] bytes=${image.bytes.length} mime=${image.mimeType}`);
+    return "mock_image_key";
+  }
+
+  if (!config.feishuAppId || !config.feishuAppSecret) {
+    throw new Error("Missing FEISHU_APP_ID or FEISHU_APP_SECRET");
+  }
+
+  const token = await fetchTenantAccessToken(config);
+  const formData = new FormData();
+  const blob = new Blob([image.bytes], {
+    type: image.mimeType || "image/png"
+  });
+
+  formData.append("image_type", "message");
+  formData.append("image", blob, "codex-generated-image.png");
+
+  const response = await fetch(`${FEISHU_BASE_URL}/open-apis/im/v1/images`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: formData
+  });
+  const data = await response.json();
+
+  if (!response.ok || data.code !== 0 || !data.data?.image_key) {
+    throw new Error(`Failed to upload Feishu image: ${JSON.stringify(data)}`);
+  }
+
+  return data.data.image_key;
+}
+
+export async function sendFeishuImageMessage(config, chatId, imageKey) {
+  if (config.mockFeishuSend) {
+    console.log(`[mock-feishu-send:image] chat_id=${chatId} image_key=${imageKey}`);
+    return;
+  }
+
+  if (!config.feishuAppId || !config.feishuAppSecret) {
+    throw new Error("Missing FEISHU_APP_ID or FEISHU_APP_SECRET");
+  }
+
+  const token = await fetchTenantAccessToken(config);
+  const response = await fetch(`${FEISHU_BASE_URL}/open-apis/im/v1/messages?receive_id_type=chat_id`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({
+      receive_id: chatId,
+      msg_type: "image",
+      content: JSON.stringify({ image_key: imageKey })
+    })
+  });
+  const data = await response.json();
+
+  if (!response.ok || data.code !== 0) {
+    throw new Error(`Failed to send Feishu image message: ${JSON.stringify(data)}`);
+  }
+
+  return data.data || data;
+}
