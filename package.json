@@ -1,0 +1,14 @@
+{
+  "name": "feishu-codex-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.mjs",
+    "start": "node src/server.mjs",
+    "check": "node --check src/server.mjs && node --test"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.68.0"
+  }
+}
