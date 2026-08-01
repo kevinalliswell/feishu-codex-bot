@@ -1,10 +1,29 @@
 import { createServer } from "node:http";
 import * as Lark from "@larksuiteoapi/node-sdk";
-import { processFeishuTextEvent } from "./bridge.mjs";
+import { processFeishuEvent } from "./bridge.mjs";
 import { loadConfig } from "./config.mjs";
-import { isUrlVerification } from "./feishu.mjs";
+import { isUrlVerification, sendFeishuTextMessage } from "./feishu.mjs";
+import { createVoiceNoteProcessor } from "./voice-note-processor.mjs";
+import { createVoiceNoteQueue } from "./voice-note-queue.mjs";
 
 const config = loadConfig();
+const voiceNoteQueue = config.voiceNotesEnabled
+  ? createVoiceNoteQueue({
+      queueDir: config.voiceNoteQueueDir,
+      processJob: createVoiceNoteProcessor(config),
+      onJobError: async (_error, job) => {
+        try {
+          await sendFeishuTextMessage(
+            config,
+            job.chatId,
+            "语音笔记保存失败，请稍后重新发送这条语音。"
+          );
+        } catch (replyError) {
+          console.error(`[voice-note-error-reply] ${String(replyError?.message || replyError)}`);
+        }
+      }
+    })
+  : null;
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -43,7 +62,7 @@ async function handleWebhookPayload(payload) {
     return { statusCode: 200, body: { challenge: payload.challenge } };
   }
 
-  const result = await processFeishuTextEvent(config, payload);
+  const result = await processFeishuEvent(config, payload, { voiceNoteQueue });
 
   return {
     statusCode: result.statusCode,
@@ -58,7 +77,8 @@ function createHealthServer() {
     if (req.method === "GET" && req.url === "/healthz") {
       writeJson(res, 200, {
         ok: true,
-        deliveryMode: config.feishuDeliveryMode
+        deliveryMode: config.feishuDeliveryMode,
+        voiceNotesEnabled: config.voiceNotesEnabled
       });
       return;
     }
@@ -95,7 +115,7 @@ async function startLongConnection() {
     encryptKey: config.feishuEncryptKey || undefined
   }).register({
     "im.message.receive_v1": async (data) => {
-      const result = await processFeishuTextEvent(config, data);
+      const result = await processFeishuEvent(config, data, { voiceNoteQueue });
 
       if (result.skipped) {
         console.log(`[feishu-skip] ${result.skipped}`);
@@ -125,6 +145,12 @@ async function startLongConnection() {
 
 async function main() {
   const healthServer = createHealthServer();
+
+  if (voiceNoteQueue) {
+    voiceNoteQueue.start().catch((error) => {
+      console.error(`[voice-note-queue-startup] ${String(error?.message || error)}`);
+    });
+  }
 
   healthServer.listen(config.port, () => {
     console.log(`Feishu Codex bridge listening on http://127.0.0.1:${config.port}`);

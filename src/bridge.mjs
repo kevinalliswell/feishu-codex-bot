@@ -1,4 +1,5 @@
 import {
+  extractAudioMessage,
   extractTextMessage,
   sendFeishuImageMessage,
   sendFeishuTextMessage,
@@ -221,6 +222,62 @@ function verifyWebhookToken(config, payload) {
   }
 
   return verifyFeishuToken(payload, config.feishuVerificationToken);
+}
+
+function isVoiceNoteChatAllowed(config, audioMessage) {
+  return audioMessage.chatType === "p2p"
+    && config.voiceNoteAllowedChatIds.length > 0
+    && config.voiceNoteAllowedChatIds.includes(audioMessage.chatId);
+}
+
+export async function processFeishuEvent(config, payload, { voiceNoteQueue } = {}) {
+  if (!verifyWebhookToken(config, payload)) {
+    logSkip("invalid verification token", null, { deliveryMode: config.feishuDeliveryMode });
+    return failure("invalid verification token", 403, { skipped: "invalid verification token" });
+  }
+
+  const audioMessage = extractAudioMessage(payload);
+  if (!audioMessage) {
+    return processFeishuTextEvent(config, payload);
+  }
+
+  if (!config.voiceNotesEnabled) {
+    return skip("voice notes disabled");
+  }
+
+  if (!isVoiceNoteChatAllowed(config, audioMessage)) {
+    logMessage("voice-skip", {
+      ...buildMessageLogContext(audioMessage),
+      reason: "voice-note chat not allowed"
+    });
+    return skip("voice-note chat not allowed");
+  }
+
+  if (audioMessage.durationMs > config.voiceNoteMaxDurationMs) {
+    logMessage("voice-skip", {
+      ...buildMessageLogContext(audioMessage),
+      durationMs: audioMessage.durationMs,
+      reason: "voice note too long"
+    });
+    return skip("voice note too long");
+  }
+
+  if (!voiceNoteQueue) {
+    return failure("voice-note queue unavailable");
+  }
+
+  const queueResult = await voiceNoteQueue.enqueue(audioMessage);
+  logMessage("voice-queued", {
+    ...buildMessageLogContext(audioMessage),
+    durationMs: audioMessage.durationMs,
+    queued: queueResult.queued
+  });
+
+  return buildResult(true, 200, {
+    queued: queueResult.queued,
+    chatId: audioMessage.chatId,
+    messageId: audioMessage.messageId
+  });
 }
 
 export async function processFeishuTextEvent(config, payload) {

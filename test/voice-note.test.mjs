@@ -8,6 +8,8 @@ import { downloadFeishuMessageResource, extractAudioMessage } from "../src/feish
 import { appendVoiceNote } from "../src/obsidian-writer.mjs";
 import { transcribeAudio } from "../src/transcription-adapter.mjs";
 import { createVoiceNoteQueue } from "../src/voice-note-queue.mjs";
+import { createVoiceNoteProcessor } from "../src/voice-note-processor.mjs";
+import { processFeishuEvent } from "../src/bridge.mjs";
 
 test("loadConfig parses voice-note settings", () => {
   const config = loadConfig({
@@ -281,4 +283,127 @@ test("createVoiceNoteQueue persists jobs and processes each message once", async
   } finally {
     await rm(queueDir, { recursive: true, force: true });
   }
+});
+
+test("processFeishuEvent quickly queues allowed private audio messages", async () => {
+  const queuedJobs = [];
+  const config = loadConfig({
+    VOICE_NOTES_ENABLED: "true",
+    VOICE_NOTE_ALLOWED_CHAT_IDS: "oc_owner",
+    VOICE_NOTE_MAX_DURATION_MS: "600000",
+    FEISHU_DELIVERY_MODE: "long_connection"
+  });
+  const payload = {
+    event_id: "evt_audio_route",
+    event_type: "im.message.receive_v1",
+    message: {
+      message_id: "om_audio_route",
+      chat_id: "oc_owner",
+      chat_type: "p2p",
+      message_type: "audio",
+      create_time: "1785591300000",
+      content: JSON.stringify({
+        file_key: "file_audio_route",
+        duration: 5000
+      })
+    }
+  };
+
+  const result = await processFeishuEvent(config, payload, {
+    voiceNoteQueue: {
+      enqueue: async (job) => {
+        queuedJobs.push(job);
+        return { queued: true };
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.queued, true);
+  assert.equal(queuedJobs.length, 1);
+  assert.equal(queuedJobs[0].messageId, "om_audio_route");
+});
+
+test("processFeishuEvent rejects voice notes outside the private-chat allowlist", async () => {
+  let enqueueCount = 0;
+  const config = loadConfig({
+    VOICE_NOTES_ENABLED: "true",
+    VOICE_NOTE_ALLOWED_CHAT_IDS: "oc_owner",
+    FEISHU_DELIVERY_MODE: "long_connection"
+  });
+
+  const result = await processFeishuEvent(config, {
+    event_id: "evt_audio_denied",
+    event_type: "im.message.receive_v1",
+    message: {
+      message_id: "om_audio_denied",
+      chat_id: "oc_other",
+      chat_type: "p2p",
+      message_type: "audio",
+      create_time: "1785591300000",
+      content: JSON.stringify({
+        file_key: "file_audio_denied",
+        duration: 5000
+      })
+    }
+  }, {
+    voiceNoteQueue: {
+      enqueue: async () => {
+        enqueueCount += 1;
+      }
+    }
+  });
+
+  assert.equal(result.skipped, "voice-note chat not allowed");
+  assert.equal(enqueueCount, 0);
+});
+
+test("createVoiceNoteProcessor downloads, transcribes, writes, and confirms without retaining audio", async () => {
+  const calls = [];
+  const processor = createVoiceNoteProcessor(
+    {
+      voiceNoteMaxAudioBytes: 1024,
+      voiceNoteMaxDurationMs: 600000,
+      obsidianVaultPath: "/tmp/My Vault",
+      voiceNoteRelativeDir: "00_Inbox/feishu/每日口述",
+      voiceNoteTimeZone: "Asia/Shanghai"
+    },
+    {
+      downloadResource: async (_config, input) => {
+        calls.push(["download", input]);
+        return { bytes: Buffer.from("audio"), contentType: "audio/ogg" };
+      },
+      transcribe: async (_config, bytes) => {
+        calls.push(["transcribe", bytes.toString()]);
+        return "今天记录了一件重要的事情。";
+      },
+      appendNote: async (input) => {
+        calls.push(["append", input]);
+        return {
+          duplicate: false,
+          filePath: "/tmp/My Vault/00_Inbox/feishu/每日口述/2026-08-01.md"
+        };
+      },
+      sendMessage: async (_config, chatId, text) => {
+        calls.push(["send", chatId, text]);
+      }
+    }
+  );
+
+  const result = await processor({
+    messageId: "om_audio_process",
+    chatId: "oc_owner",
+    chatType: "p2p",
+    fileKey: "file_audio_process",
+    durationMs: 5000,
+    createdAtMs: Date.parse("2026-08-01T13:35:00.000Z")
+  });
+
+  assert.equal(result.duplicate, false);
+  assert.equal(calls[0][0], "download");
+  assert.equal(calls[1][0], "transcribe");
+  assert.equal(calls[2][0], "append");
+  assert.deepEqual(calls[3].slice(0, 2), ["send", "oc_owner"]);
+  assert.match(calls[3][2], /已保存/);
+  assert.doesNotMatch(calls[3][2], /今天记录/);
 });
