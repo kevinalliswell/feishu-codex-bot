@@ -99,7 +99,7 @@ export async function transcribeAudio(config, audioBytes, {
 
     // CLI flags follow the official whisper.cpp example reference.
     // Source: https://github.com/ggml-org/whisper.cpp/blob/master/examples/cli/README.md
-    await commandRunner(config.whisperCommand, [
+    const whisperArgs = [
       "-m",
       config.whisperModelPath,
       "-f",
@@ -111,7 +111,17 @@ export async function transcribeAudio(config, audioBytes, {
       outputBase,
       "-np",
       "-nt"
-    ], {
+    ];
+    const initialPrompt = String(config.voiceNoteInitialPrompt || "")
+      .replaceAll("\0", "")
+      .trim()
+      .slice(0, 1000);
+
+    if (initialPrompt) {
+      whisperArgs.push("--prompt", initialPrompt);
+    }
+
+    await commandRunner(config.whisperCommand, whisperArgs, {
       timeoutMs: config.voiceNoteTranscribeTimeoutMs,
       label: "whisper.cpp transcription"
     });

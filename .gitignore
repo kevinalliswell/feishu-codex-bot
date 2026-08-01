@@ -2,3 +2,5 @@
 .DS_Store
 logs/
 node_modules/
+.data/
+models/*.bin

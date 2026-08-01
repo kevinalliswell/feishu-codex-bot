@@ -11,6 +11,7 @@
 - 支持私聊直接触发、群聊 `@机器人` 触发，以及 `/codex` 显式命令
 - 默认用飞书互动卡片回发 Codex 结果
 - 支持 Xingwan 图片生成并把图片发回飞书
+- 支持把白名单私聊中的飞书语音在 Mac 本地转写，并写入 Obsidian 每日口述 Inbox
 - 支持 5 种 Codex 适配模式：
   - `http`: 转发到本地 HTTP 服务
   - `openai_compatible`: 调用 OpenAI-compatible Chat Completions API
@@ -145,6 +146,54 @@ IMAGE_GENERATION_API_KEY=sk_xxx
 ```
 
 文字聊天和图片生成可以使用不同供应商。例如：`CODEX_MODE=openai_compatible` + `OPENAI_COMPAT_PROVIDER=qhaigc` 负责文字，`IMAGE_GENERATION_PROVIDER=xingwan` 负责生图。
+
+### 飞书语音写入 Obsidian
+
+语音笔记只接受白名单中的机器人私聊。事件先持久化到本地队列，飞书回调会立即完成；后台随后下载音频、使用 whisper.cpp 本地转写、追加到当天的 Markdown，并回复保存结果。音频和转写临时文件处理后会删除，队列中不会保留正文。
+
+安装本地依赖：
+
+```bash
+brew install whisper-cpp ffmpeg
+```
+
+从 whisper.cpp 官方模型仓库下载中文效果更好的量化模型：
+
+```bash
+mkdir -p models
+curl -L --fail --output models/ggml-large-v3-turbo-q5_0.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+```
+
+配置示例：
+
+```env
+VOICE_NOTES_ENABLED=true
+OBSIDIAN_VAULT_PATH=/Users/kevin/Documents/Obsidian Vault
+VOICE_NOTE_RELATIVE_DIR=00_Inbox/feishu/每日口述
+VOICE_NOTE_ALLOWED_CHAT_IDS=oc_xxx
+VOICE_NOTE_TIME_ZONE=Asia/Shanghai
+VOICE_NOTE_QUEUE_DIR=.data/voice-note-jobs
+VOICE_NOTE_LANGUAGE=zh
+VOICE_NOTE_INITIAL_PROMPT=这是一段飞书口述笔记，内容涉及 Obsidian、Codex、每周复盘和生活笔记。
+FFMPEG_COMMAND=/opt/homebrew/bin/ffmpeg
+WHISPER_COMMAND=/opt/homebrew/bin/whisper-cli
+WHISPER_MODEL_PATH=/absolute/path/to/models/ggml-large-v3-turbo-q5_0.bin
+```
+
+`VOICE_NOTE_ALLOWED_CHAT_IDS` 必须显式配置；为空时所有语音都会被拒绝。当前仅接收私聊语音，群聊语音不会写入笔记。默认输出到：
+
+```text
+00_Inbox/feishu/每日口述/YYYY-MM-DD.md
+```
+
+飞书下载消息音频需要应用具有“获取单聊、群组消息”或等价权限。接口和 `type=file` 参数说明见飞书官方文档：
+
+https://open.feishu.cn/document/server-docs/im-v1/message/get-2?lang=zh-CN
+
+whisper.cpp 的安装、模型和 CLI 参数说明：
+
+https://github.com/ggml-org/whisper.cpp/blob/master/README.md
 
 3. 启动服务
 

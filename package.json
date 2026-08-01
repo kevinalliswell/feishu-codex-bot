@@ -9,6 +9,6 @@
     "check": "node --check src/server.mjs && node --test"
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.68.0"
+    "@larksuiteoapi/node-sdk": "^1.72.0"
   }
 }

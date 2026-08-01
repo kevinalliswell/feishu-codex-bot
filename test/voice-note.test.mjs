@@ -25,6 +25,7 @@ test("loadConfig parses voice-note settings", () => {
     WHISPER_COMMAND: "/opt/homebrew/bin/whisper-cli",
     WHISPER_MODEL_PATH: "/tmp/ggml-small.bin",
     VOICE_NOTE_LANGUAGE: "zh",
+    VOICE_NOTE_INITIAL_PROMPT: "飞书，Obsidian，口述笔记",
     VOICE_NOTE_TRANSCRIBE_TIMEOUT_MS: "90000"
   });
 
@@ -40,6 +41,7 @@ test("loadConfig parses voice-note settings", () => {
   assert.equal(config.whisperCommand, "/opt/homebrew/bin/whisper-cli");
   assert.equal(config.whisperModelPath, "/tmp/ggml-small.bin");
   assert.equal(config.voiceNoteLanguage, "zh");
+  assert.equal(config.voiceNoteInitialPrompt, "飞书，Obsidian，口述笔记");
   assert.equal(config.voiceNoteTranscribeTimeoutMs, 90000);
 });
 
@@ -211,6 +213,7 @@ test("transcribeAudio converts input to WAV and reads whisper.cpp text output", 
         whisperCommand: "whisper-test",
         whisperModelPath: modelPath,
         voiceNoteLanguage: "zh",
+        voiceNoteInitialPrompt: "飞书，Obsidian，口述笔记",
         voiceNoteTranscribeTimeoutMs: 90_000
       },
       Buffer.from("fake-audio"),
@@ -236,6 +239,10 @@ test("transcribeAudio converts input to WAV and reads whisper.cpp text output", 
     assert.ok(commands[1].args.includes("-otxt"));
     assert.ok(commands[1].args.includes("-nt"));
     assert.equal(commands[1].args[commands[1].args.indexOf("-l") + 1], "zh");
+    assert.equal(
+      commands[1].args[commands[1].args.indexOf("--prompt") + 1],
+      "飞书，Obsidian，口述笔记"
+    );
   } finally {
     await rm(testDir, { recursive: true, force: true });
   }
