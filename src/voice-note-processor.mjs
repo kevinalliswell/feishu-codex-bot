@@ -10,16 +10,22 @@ export function createVoiceNoteProcessor(config, {
   sendMessage = sendFeishuTextMessage
 } = {}) {
   return async function processVoiceNote(job) {
-    if (job.durationMs > config.voiceNoteMaxDurationMs) {
-      throw new Error(`Voice note exceeds the configured duration limit of ${config.voiceNoteMaxDurationMs}ms`);
+    const isTextNote = job.kind === "text";
+    let transcript = job.text;
+
+    if (!isTextNote) {
+      if (job.durationMs > config.voiceNoteMaxDurationMs) {
+        throw new Error(`Voice note exceeds the configured duration limit of ${config.voiceNoteMaxDurationMs}ms`);
+      }
+
+      const resource = await downloadResource(config, {
+        messageId: job.messageId,
+        fileKey: job.fileKey,
+        maxBytes: config.voiceNoteMaxAudioBytes
+      });
+      transcript = await transcribe(config, resource.bytes);
     }
 
-    const resource = await downloadResource(config, {
-      messageId: job.messageId,
-      fileKey: job.fileKey,
-      maxBytes: config.voiceNoteMaxAudioBytes
-    });
-    const transcript = await transcribe(config, resource.bytes);
     const noteResult = await appendNote({
       vaultPath: config.obsidianVaultPath,
       relativeDir: config.voiceNoteRelativeDir,
@@ -30,7 +36,7 @@ export function createVoiceNoteProcessor(config, {
     });
     const relativePath = relative(config.obsidianVaultPath, noteResult.filePath);
     const confirmation = noteResult.duplicate
-      ? `这条语音已经记录过：\n${relativePath}`
+      ? `这条${isTextNote ? "文字笔记" : "语音"}已经记录过：\n${relativePath}`
       : `已保存到 Obsidian：\n${relativePath}`;
 
     await sendMessage(config, job.chatId, confirmation);

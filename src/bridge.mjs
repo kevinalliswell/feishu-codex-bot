@@ -230,6 +230,23 @@ function isVoiceNoteChatAllowed(config, audioMessage) {
     && config.voiceNoteAllowedChatIds.includes(audioMessage.chatId);
 }
 
+function extractTextNote(text) {
+  const match = String(text || "").trim().match(/^\/(?:note|n)(?:\s+([\s\S]*))?$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  return String(match[1] || "").trim();
+}
+
+function extractMessageCreatedAtMs(payload) {
+  const event = payload?.event || payload;
+  const createdAtMs = Number(event?.message?.create_time || payload?.header?.create_time || 0);
+
+  return Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now();
+}
+
 export async function processFeishuEvent(config, payload, { voiceNoteQueue } = {}) {
   if (!verifyWebhookToken(config, payload)) {
     logSkip("invalid verification token", null, { deliveryMode: config.feishuDeliveryMode });
@@ -238,7 +255,51 @@ export async function processFeishuEvent(config, payload, { voiceNoteQueue } = {
 
   const audioMessage = extractAudioMessage(payload);
   if (!audioMessage) {
-    return processFeishuTextEvent(config, payload);
+    const textMessage = extractTextMessage(payload);
+    const textNote = textMessage ? extractTextNote(textMessage.text) : null;
+
+    if (textNote === null) {
+      return processFeishuTextEvent(config, payload);
+    }
+
+    if (!config.voiceNotesEnabled) {
+      return skip("voice notes disabled");
+    }
+
+    if (!isVoiceNoteChatAllowed(config, textMessage)) {
+      logMessage("text-note-skip", {
+        ...buildMessageLogContext(textMessage),
+        reason: "voice-note chat not allowed"
+      });
+      return skip("voice-note chat not allowed");
+    }
+
+    if (!textNote) {
+      return skip("text note is empty");
+    }
+
+    if (!voiceNoteQueue) {
+      return failure("voice-note queue unavailable");
+    }
+
+    const queueResult = await voiceNoteQueue.enqueue({
+      kind: "text",
+      messageId: textMessage.messageId,
+      chatId: textMessage.chatId,
+      chatType: textMessage.chatType,
+      text: textNote,
+      createdAtMs: extractMessageCreatedAtMs(payload)
+    });
+    logMessage("text-note-queued", {
+      ...buildMessageLogContext(textMessage),
+      queued: queueResult.queued
+    });
+
+    return buildResult(true, 200, {
+      queued: queueResult.queued,
+      chatId: textMessage.chatId,
+      messageId: textMessage.messageId
+    });
   }
 
   if (!config.voiceNotesEnabled) {

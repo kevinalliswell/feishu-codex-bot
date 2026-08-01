@@ -12,6 +12,7 @@
 - 默认用飞书互动卡片回发 Codex 结果
 - 支持 Xingwan 图片生成并把图片发回飞书
 - 支持把白名单私聊中的飞书语音在 Mac 本地转写，并写入 Obsidian 每日口述 Inbox
+- 支持在白名单私聊中用 `/note` 或 `/n` 把文字追加到同一个 Obsidian 每日口述文件
 - 支持 5 种 Codex 适配模式：
   - `http`: 转发到本地 HTTP 服务
   - `openai_compatible`: 调用 OpenAI-compatible Chat Completions API
@@ -147,9 +148,30 @@ IMAGE_GENERATION_API_KEY=sk_xxx
 
 文字聊天和图片生成可以使用不同供应商。例如：`CODEX_MODE=openai_compatible` + `OPENAI_COMPAT_PROVIDER=qhaigc` 负责文字，`IMAGE_GENERATION_PROVIDER=xingwan` 负责生图。
 
-### 飞书语音写入 Obsidian
+### 飞书语音和文字写入 Obsidian
 
-语音笔记只接受白名单中的机器人私聊。事件先持久化到本地队列，飞书回调会立即完成；后台随后下载音频、使用 whisper.cpp 本地转写、追加到当天的 Markdown，并回复保存结果。音频和转写临时文件处理后会删除，队列中不会保留正文。
+语音笔记只接受白名单中的机器人私聊。事件先持久化到本地队列，飞书回调会立即完成；后台随后下载音频、使用 whisper.cpp 本地转写、追加到当天的 Markdown，并回复保存结果。音频和转写临时文件处理后会删除，任务成功后队列记录不会保留正文。
+
+文字笔记使用同一份私聊白名单和持久化队列，不经过音频下载或转写。待处理或失败重试期间，正文仅保存在本机权限为 `0600` 的任务文件中，成功后会从任务记录中移除。发送以下任一命令即可：
+
+```text
+/note 今天陪孩子去公园了。
+/n 今天完成了半小时运动。
+```
+
+语音和文字按 `Asia/Shanghai` 时区合并到当天的同一个文件，不同时间的记录以二级标题区分：
+
+```markdown
+# 每日口述 2026-08-01
+
+## 09:15
+上午整理了今天的安排。
+
+## 14:40
+下午完成了半小时运动。
+```
+
+语音转文字在 Mac 本地完成：飞书提供语音消息事件和音频文件，FFmpeg 负责转换音频格式，whisper.cpp 负责运行基于 OpenAI Whisper 的本地模型。当前没有文字转语音功能，也不会把语音正文发送到云端转写服务。
 
 安装本地依赖：
 
@@ -223,6 +245,13 @@ node --env-file=.env src/server.mjs
 
 ```text
 /codex 帮我总结今天这个仓库要做什么
+```
+
+把文字记入当天的 Obsidian 文件：
+
+```text
+/note 今天需要复盘和孩子沟通时的耐心。
+/n 晚上散步三十分钟，状态不错。
 ```
 
 `/codex` 的作用是防止群聊里普通聊天误触发本地 Codex。默认 `FEISHU_TRIGGER_MODE=mention_or_prefix` 下，私聊无需前缀，群聊 `@机器人` 无需前缀，`/codex` 仍然可用。

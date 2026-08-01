@@ -13,10 +13,11 @@ const voiceNoteQueue = config.voiceNotesEnabled
       processJob: createVoiceNoteProcessor(config),
       onJobError: async (_error, job) => {
         try {
+          const noteType = job.kind === "text" ? "文字笔记" : "语音笔记";
           await sendFeishuTextMessage(
             config,
             job.chatId,
-            "语音笔记保存失败，请稍后重新发送这条语音。"
+            `${noteType}保存失败，请稍后重新发送这条笔记。`
           );
         } catch (replyError) {
           console.error(`[voice-note-error-reply] ${String(replyError?.message || replyError)}`);

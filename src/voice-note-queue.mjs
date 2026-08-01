@@ -3,12 +3,12 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]{1,240}$/;
+const MAX_TEXT_NOTE_CHARS = 200_000;
 
 function validateJob(job) {
   for (const [field, value] of [
     ["messageId", job?.messageId],
-    ["chatId", job?.chatId],
-    ["fileKey", job?.fileKey]
+    ["chatId", job?.chatId]
   ]) {
     if (!IDENTIFIER_PATTERN.test(String(value || ""))) {
       throw new Error(`Invalid voice-note job ${field}`);
@@ -19,25 +19,55 @@ function validateJob(job) {
     throw new Error("Voice notes are only accepted from private chats");
   }
 
-  if (!Number.isFinite(job.durationMs) || job.durationMs < 0) {
-    throw new Error("Invalid voice-note duration");
-  }
-
   if (!Number.isFinite(job.createdAtMs) || job.createdAtMs <= 0) {
     throw new Error("Invalid voice-note creation time");
+  }
+
+  const kind = job.kind || "audio";
+  if (kind === "text") {
+    const text = String(job.text || "").trim();
+    if (!text || text.length > MAX_TEXT_NOTE_CHARS) {
+      throw new Error("Invalid text-note content");
+    }
+    return;
+  }
+
+  if (kind !== "audio") {
+    throw new Error("Invalid voice-note job kind");
+  }
+
+  if (!IDENTIFIER_PATTERN.test(String(job.fileKey || ""))) {
+    throw new Error("Invalid voice-note job fileKey");
+  }
+
+  if (!Number.isFinite(job.durationMs) || job.durationMs < 0) {
+    throw new Error("Invalid voice-note duration");
   }
 }
 
 function pendingRecord(job) {
-  return {
+  const record = {
     status: "pending",
     attempts: 0,
     messageId: job.messageId,
     chatId: job.chatId,
     chatType: job.chatType,
-    fileKey: job.fileKey,
-    durationMs: job.durationMs,
     createdAtMs: job.createdAtMs
+  };
+
+  if (job.kind === "text") {
+    return {
+      ...record,
+      kind: "text",
+      text: job.text
+    };
+  }
+
+  return {
+    ...record,
+    kind: "audio",
+    fileKey: job.fileKey,
+    durationMs: job.durationMs
   };
 }
 

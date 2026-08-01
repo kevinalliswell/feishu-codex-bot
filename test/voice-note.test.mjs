@@ -123,6 +123,37 @@ test("appendVoiceNote creates a daily note and deduplicates by message id", asyn
   }
 });
 
+test("appendVoiceNote keeps same-day entries in one file with separate timestamps", async () => {
+  const vaultPath = await mkdtemp(join(tmpdir(), "daily-note-vault-"));
+
+  try {
+    const first = await appendVoiceNote({
+      vaultPath,
+      relativeDir: "00_Inbox/feishu/每日口述",
+      transcript: "上午整理了今天的安排。",
+      messageId: "om_same_day_1",
+      createdAtMs: Date.parse("2026-08-01T01:15:00.000Z"),
+      timeZone: "Asia/Shanghai"
+    });
+    const second = await appendVoiceNote({
+      vaultPath,
+      relativeDir: "00_Inbox/feishu/每日口述",
+      transcript: "下午完成了半小时运动。",
+      messageId: "om_same_day_2",
+      createdAtMs: Date.parse("2026-08-01T06:40:00.000Z"),
+      timeZone: "Asia/Shanghai"
+    });
+    const contents = await readFile(first.filePath, "utf8");
+
+    assert.equal(second.filePath, first.filePath);
+    assert.equal(first.filePath, join(vaultPath, "00_Inbox/feishu/每日口述/2026-08-01.md"));
+    assert.match(contents, /## 09:15\n\n上午整理了今天的安排。/);
+    assert.match(contents, /## 14:40\n\n下午完成了半小时运动。/);
+  } finally {
+    await rm(vaultPath, { recursive: true, force: true });
+  }
+});
+
 test("appendVoiceNote rejects paths outside the configured vault", async () => {
   const vaultPath = await mkdtemp(join(tmpdir(), "voice-note-vault-"));
 
@@ -292,6 +323,41 @@ test("createVoiceNoteQueue persists jobs and processes each message once", async
   }
 });
 
+test("createVoiceNoteQueue persists and processes text-note jobs", async () => {
+  const queueDir = await mkdtemp(join(tmpdir(), "text-note-queue-"));
+  const processed = [];
+  const job = {
+    kind: "text",
+    messageId: "om_text_queue",
+    chatId: "oc_owner",
+    chatType: "p2p",
+    text: "今天读完了一章书。",
+    createdAtMs: Date.parse("2026-08-01T13:35:00.000Z")
+  };
+
+  try {
+    const queue = createVoiceNoteQueue({
+      queueDir,
+      processJob: async (queuedJob) => {
+        processed.push(queuedJob);
+      }
+    });
+
+    const result = await queue.enqueue(job);
+    await queue.drain();
+
+    const storedJob = JSON.parse(await readFile(join(queueDir, "om_text_queue.json"), "utf8"));
+    assert.equal(result.queued, true);
+    assert.equal(processed.length, 1);
+    assert.equal(processed[0].kind, "text");
+    assert.equal(processed[0].text, "今天读完了一章书。");
+    assert.equal(storedJob.status, "done");
+    assert.equal(storedJob.text, undefined);
+  } finally {
+    await rm(queueDir, { recursive: true, force: true });
+  }
+});
+
 test("processFeishuEvent quickly queues allowed private audio messages", async () => {
   const queuedJobs = [];
   const config = loadConfig({
@@ -329,6 +395,148 @@ test("processFeishuEvent quickly queues allowed private audio messages", async (
   assert.equal(result.queued, true);
   assert.equal(queuedJobs.length, 1);
   assert.equal(queuedJobs[0].messageId, "om_audio_route");
+});
+
+test("processFeishuEvent queues /note text from an allowed private chat", async () => {
+  const queuedJobs = [];
+  const config = loadConfig({
+    VOICE_NOTES_ENABLED: "true",
+    VOICE_NOTE_ALLOWED_CHAT_IDS: "oc_owner",
+    CODEX_MODE: "mock",
+    MOCK_FEISHU_SEND: "true",
+    FEISHU_DELIVERY_MODE: "long_connection"
+  });
+
+  const result = await processFeishuEvent(config, {
+    event_id: "evt_text_note",
+    event_type: "im.message.receive_v1",
+    message: {
+      message_id: "om_text_note",
+      chat_id: "oc_owner",
+      chat_type: "p2p",
+      message_type: "text",
+      create_time: "1785591300000",
+      content: JSON.stringify({ text: "/note 今天陪孩子去公园了。" })
+    }
+  }, {
+    voiceNoteQueue: {
+      enqueue: async (job) => {
+        queuedJobs.push(job);
+        return { queued: true };
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.queued, true);
+  assert.deepEqual(queuedJobs, [{
+    kind: "text",
+    messageId: "om_text_note",
+    chatId: "oc_owner",
+    chatType: "p2p",
+    text: "今天陪孩子去公园了。",
+    createdAtMs: 1785591300000
+  }]);
+});
+
+test("processFeishuEvent accepts /n as a text-note alias", async () => {
+  const queuedJobs = [];
+  const config = loadConfig({
+    VOICE_NOTES_ENABLED: "true",
+    VOICE_NOTE_ALLOWED_CHAT_IDS: "oc_owner",
+    CODEX_MODE: "mock",
+    MOCK_FEISHU_SEND: "true",
+    FEISHU_DELIVERY_MODE: "long_connection"
+  });
+
+  const result = await processFeishuEvent(config, {
+    event_id: "evt_short_text_note",
+    event_type: "im.message.receive_v1",
+    message: {
+      message_id: "om_short_text_note",
+      chat_id: "oc_owner",
+      chat_type: "p2p",
+      message_type: "text",
+      create_time: "1785591300000",
+      content: JSON.stringify({ text: "/n 完成了半小时运动。" })
+    }
+  }, {
+    voiceNoteQueue: {
+      enqueue: async (job) => {
+        queuedJobs.push(job);
+        return { queued: true };
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.queued, true);
+  assert.equal(queuedJobs[0].kind, "text");
+  assert.equal(queuedJobs[0].text, "完成了半小时运动。");
+});
+
+test("processFeishuEvent keeps ordinary private text on the Codex route", async () => {
+  let enqueueCount = 0;
+  const config = loadConfig({
+    VOICE_NOTES_ENABLED: "true",
+    VOICE_NOTE_ALLOWED_CHAT_IDS: "oc_owner",
+    CODEX_MODE: "mock",
+    MOCK_FEISHU_SEND: "true",
+    FEISHU_DELIVERY_MODE: "long_connection"
+  });
+
+  const result = await processFeishuEvent(config, {
+    event_id: "evt_regular_text",
+    event_type: "im.message.receive_v1",
+    message: {
+      message_id: "om_regular_text",
+      chat_id: "oc_owner",
+      chat_type: "p2p",
+      message_type: "text",
+      content: JSON.stringify({ text: "帮我总结今天的任务" })
+    }
+  }, {
+    voiceNoteQueue: {
+      enqueue: async () => {
+        enqueueCount += 1;
+        return { queued: true };
+      }
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.queued, undefined);
+  assert.equal(enqueueCount, 0);
+});
+
+test("processFeishuEvent rejects text notes outside the private-chat allowlist", async () => {
+  let enqueueCount = 0;
+  const config = loadConfig({
+    VOICE_NOTES_ENABLED: "true",
+    VOICE_NOTE_ALLOWED_CHAT_IDS: "oc_owner",
+    FEISHU_DELIVERY_MODE: "long_connection"
+  });
+
+  const result = await processFeishuEvent(config, {
+    event_id: "evt_text_note_denied",
+    event_type: "im.message.receive_v1",
+    message: {
+      message_id: "om_text_note_denied",
+      chat_id: "oc_other",
+      chat_type: "p2p",
+      message_type: "text",
+      content: JSON.stringify({ text: "/note 不应写入的内容" })
+    }
+  }, {
+    voiceNoteQueue: {
+      enqueue: async () => {
+        enqueueCount += 1;
+      }
+    }
+  });
+
+  assert.equal(result.skipped, "voice-note chat not allowed");
+  assert.equal(enqueueCount, 0);
 });
 
 test("processFeishuEvent rejects voice notes outside the private-chat allowlist", async () => {
@@ -413,4 +621,50 @@ test("createVoiceNoteProcessor downloads, transcribes, writes, and confirms with
   assert.deepEqual(calls[3].slice(0, 2), ["send", "oc_owner"]);
   assert.match(calls[3][2], /已保存/);
   assert.doesNotMatch(calls[3][2], /今天记录/);
+});
+
+test("createVoiceNoteProcessor writes text jobs without audio transcription", async () => {
+  const calls = [];
+  const processor = createVoiceNoteProcessor(
+    {
+      voiceNoteMaxAudioBytes: 1024,
+      voiceNoteMaxDurationMs: 600000,
+      obsidianVaultPath: "/tmp/My Vault",
+      voiceNoteRelativeDir: "00_Inbox/feishu/每日口述",
+      voiceNoteTimeZone: "Asia/Shanghai"
+    },
+    {
+      downloadResource: async () => {
+        throw new Error("text notes must not download audio");
+      },
+      transcribe: async () => {
+        throw new Error("text notes must not run transcription");
+      },
+      appendNote: async (input) => {
+        calls.push(["append", input]);
+        return {
+          duplicate: false,
+          filePath: "/tmp/My Vault/00_Inbox/feishu/每日口述/2026-08-01.md"
+        };
+      },
+      sendMessage: async (_config, chatId, text) => {
+        calls.push(["send", chatId, text]);
+      }
+    }
+  );
+
+  const result = await processor({
+    kind: "text",
+    messageId: "om_text_process",
+    chatId: "oc_owner",
+    chatType: "p2p",
+    text: "今天完成了半小时运动。",
+    createdAtMs: Date.parse("2026-08-01T13:35:00.000Z")
+  });
+
+  assert.equal(result.duplicate, false);
+  assert.equal(calls[0][0], "append");
+  assert.equal(calls[0][1].transcript, "今天完成了半小时运动。");
+  assert.deepEqual(calls[1].slice(0, 2), ["send", "oc_owner"]);
+  assert.match(calls[1][2], /已保存/);
 });
