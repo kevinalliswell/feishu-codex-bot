@@ -30,6 +30,38 @@ export function extractTextMessage(eventBody) {
   }
 }
 
+export function extractAudioMessage(eventBody) {
+  const event = eventBody?.event || eventBody;
+  const message = event?.message;
+
+  if (!message || message.message_type !== "audio") {
+    return null;
+  }
+
+  try {
+    const content = JSON.parse(message.content);
+    const createdAtMs = Number(message.create_time || eventBody?.header?.create_time || 0);
+
+    if (!message.message_id || !message.chat_id || !content.file_key) {
+      return null;
+    }
+
+    return {
+      chatId: message.chat_id,
+      messageId: message.message_id,
+      chatType: message.chat_type,
+      fileKey: content.file_key,
+      durationMs: Number(content.duration || 0),
+      createdAtMs: Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now(),
+      senderOpenId: event?.sender?.sender_id?.open_id || "",
+      eventId: eventBody?.header?.event_id || event?.event_id || "",
+      eventType: eventBody?.header?.event_type || event?.event_type || ""
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function isUrlVerification(payload) {
   return payload?.type === "url_verification" && typeof payload?.challenge === "string";
 }
@@ -73,6 +105,91 @@ async function fetchTenantAccessToken(config) {
   };
 
   return tokenCache.value;
+}
+
+function assertResourceIdentifier(value, label) {
+  if (!/^[A-Za-z0-9_-]{1,240}$/.test(String(value || ""))) {
+    throw new Error(`Invalid ${label} for Feishu message resource`);
+  }
+}
+
+async function readBoundedResponse(response, maxBytes) {
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error(`Feishu message resource exceeds the configured limit of ${maxBytes} bytes`);
+  }
+
+  if (!response.body) {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > maxBytes) {
+      throw new Error(`Feishu message resource exceeds the configured limit of ${maxBytes} bytes`);
+    }
+    return bytes;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel();
+      throw new Error(`Feishu message resource exceeds the configured limit of ${maxBytes} bytes`);
+    }
+    chunks.push(Buffer.from(value));
+  }
+
+  return Buffer.concat(chunks, totalBytes);
+}
+
+export async function downloadFeishuMessageResource(config, {
+  messageId,
+  fileKey,
+  maxBytes
+}, {
+  accessTokenProvider = fetchTenantAccessToken,
+  fetchImpl = fetch
+} = {}) {
+  assertResourceIdentifier(messageId, "message id");
+  assertResourceIdentifier(fileKey, "file key");
+
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+    throw new Error("Invalid maximum size for Feishu message resource");
+  }
+
+  const token = await accessTokenProvider(config);
+  // Feishu message resources (including audio) use type=file.
+  // Source: https://open.feishu.cn/document/server-docs/im-v1/message/get-2?lang=zh-CN
+  const url = new URL(
+    `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(fileKey)}`,
+    FEISHU_BASE_URL
+  );
+  url.searchParams.set("type", "file");
+
+  const response = await fetchImpl(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    signal: AbortSignal.timeout(config.voiceNoteDownloadTimeoutMs || 60_000)
+  });
+
+  if (!response.ok) {
+    const body = (await response.text()).slice(0, 1000);
+    throw new Error(`Failed to download Feishu message resource (${response.status}): ${body}`);
+  }
+
+  return {
+    bytes: await readBoundedResponse(response, maxBytes),
+    contentType: response.headers.get("content-type") || "application/octet-stream"
+  };
 }
 
 function chunkText(text, chunkSize = 3500, maxChunks = 8) {

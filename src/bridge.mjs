@@ -1,4 +1,5 @@
 import {
+  extractAudioMessage,
   extractTextMessage,
   sendFeishuImageMessage,
   sendFeishuTextMessage,
@@ -221,6 +222,123 @@ function verifyWebhookToken(config, payload) {
   }
 
   return verifyFeishuToken(payload, config.feishuVerificationToken);
+}
+
+function isVoiceNoteChatAllowed(config, audioMessage) {
+  return audioMessage.chatType === "p2p"
+    && config.voiceNoteAllowedChatIds.length > 0
+    && config.voiceNoteAllowedChatIds.includes(audioMessage.chatId);
+}
+
+function extractTextNote(text) {
+  const match = String(text || "").trim().match(/^\/(?:note|n)(?:\s+([\s\S]*))?$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  return String(match[1] || "").trim();
+}
+
+function extractMessageCreatedAtMs(payload) {
+  const event = payload?.event || payload;
+  const createdAtMs = Number(event?.message?.create_time || payload?.header?.create_time || 0);
+
+  return Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now();
+}
+
+export async function processFeishuEvent(config, payload, { voiceNoteQueue } = {}) {
+  if (!verifyWebhookToken(config, payload)) {
+    logSkip("invalid verification token", null, { deliveryMode: config.feishuDeliveryMode });
+    return failure("invalid verification token", 403, { skipped: "invalid verification token" });
+  }
+
+  const audioMessage = extractAudioMessage(payload);
+  if (!audioMessage) {
+    const textMessage = extractTextMessage(payload);
+    const textNote = textMessage ? extractTextNote(textMessage.text) : null;
+
+    if (textNote === null) {
+      return processFeishuTextEvent(config, payload);
+    }
+
+    if (!config.voiceNotesEnabled) {
+      return skip("voice notes disabled");
+    }
+
+    if (!isVoiceNoteChatAllowed(config, textMessage)) {
+      logMessage("text-note-skip", {
+        ...buildMessageLogContext(textMessage),
+        reason: "voice-note chat not allowed"
+      });
+      return skip("voice-note chat not allowed");
+    }
+
+    if (!textNote) {
+      return skip("text note is empty");
+    }
+
+    if (!voiceNoteQueue) {
+      return failure("voice-note queue unavailable");
+    }
+
+    const queueResult = await voiceNoteQueue.enqueue({
+      kind: "text",
+      messageId: textMessage.messageId,
+      chatId: textMessage.chatId,
+      chatType: textMessage.chatType,
+      text: textNote,
+      createdAtMs: extractMessageCreatedAtMs(payload)
+    });
+    logMessage("text-note-queued", {
+      ...buildMessageLogContext(textMessage),
+      queued: queueResult.queued
+    });
+
+    return buildResult(true, 200, {
+      queued: queueResult.queued,
+      chatId: textMessage.chatId,
+      messageId: textMessage.messageId
+    });
+  }
+
+  if (!config.voiceNotesEnabled) {
+    return skip("voice notes disabled");
+  }
+
+  if (!isVoiceNoteChatAllowed(config, audioMessage)) {
+    logMessage("voice-skip", {
+      ...buildMessageLogContext(audioMessage),
+      reason: "voice-note chat not allowed"
+    });
+    return skip("voice-note chat not allowed");
+  }
+
+  if (audioMessage.durationMs > config.voiceNoteMaxDurationMs) {
+    logMessage("voice-skip", {
+      ...buildMessageLogContext(audioMessage),
+      durationMs: audioMessage.durationMs,
+      reason: "voice note too long"
+    });
+    return skip("voice note too long");
+  }
+
+  if (!voiceNoteQueue) {
+    return failure("voice-note queue unavailable");
+  }
+
+  const queueResult = await voiceNoteQueue.enqueue(audioMessage);
+  logMessage("voice-queued", {
+    ...buildMessageLogContext(audioMessage),
+    durationMs: audioMessage.durationMs,
+    queued: queueResult.queued
+  });
+
+  return buildResult(true, 200, {
+    queued: queueResult.queued,
+    chatId: audioMessage.chatId,
+    messageId: audioMessage.messageId
+  });
 }
 
 export async function processFeishuTextEvent(config, payload) {

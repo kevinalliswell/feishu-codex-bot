@@ -1,6 +1,32 @@
 # Feishu Codex Bridge
 
-把飞书订阅事件桥接到你本地的 Codex 服务，适合用手机在飞书里发指令，再把结果回到原会话。
+把飞书变成 Mac 上 Codex 与 Obsidian 的移动入口：在手机里随手说、随手写，内容在本机处理后自动进入当天的 Markdown，等待每周复盘时再归档到长期笔记。
+
+## 为什么做这个项目
+
+有价值的生活记录经常消失在“稍后再整理”里。这个项目把记录阶段的摩擦降到最低，同时把隐私和文件所有权留在自己手上：
+
+- **先捕捉，后整理**：当天的语音和文字先进入每日 Inbox，不在记录时打断思路做分类。
+- **本地优先**：语音通过 Mac 上的 FFmpeg 与 whisper.cpp 转写，不依赖云端语音识别服务。
+- **开放格式**：最终结果是普通 Markdown，不被某个 SaaS 或数据库锁定。
+- **可靠可追溯**：消息先进入持久化队列，按飞书消息 ID 去重；同日记录集中在一个文件并保留时间戳。
+- **兼顾行动与知识**：普通消息仍可调用 Codex，`/note` 与 `/n` 专门负责沉淀笔记。
+
+## 核心工作流
+
+```text
+飞书机器人私聊
+  ├─ 语音消息 ──> FFmpeg ──> whisper.cpp 本地转写 ─┐
+  └─ /note 或 /n ───────────> 文字正文 ───────────┤
+                                                   ↓
+                                            本地持久化队列
+                                                   ↓
+                       00_Inbox/feishu/每日口述/YYYY-MM-DD.md
+                                                   ↓ 每周复盘
+                         生活笔记/家庭育儿、健康、技能学习或生活随笔
+```
+
+记录时只负责把想法留下；分类、提炼和迁移发生在复盘阶段。这让 Inbox 保持低门槛，也让“生活笔记”只留下值得长期复用的内容。
 
 ## 当前实现
 
@@ -11,6 +37,8 @@
 - 支持私聊直接触发、群聊 `@机器人` 触发，以及 `/codex` 显式命令
 - 默认用飞书互动卡片回发 Codex 结果
 - 支持 Xingwan 图片生成并把图片发回飞书
+- 支持把白名单私聊中的飞书语音在 Mac 本地转写，并写入 Obsidian 每日口述 Inbox
+- 支持在白名单私聊中用 `/note` 或 `/n` 把文字追加到同一个 Obsidian 每日口述文件
 - 支持 5 种 Codex 适配模式：
   - `http`: 转发到本地 HTTP 服务
   - `openai_compatible`: 调用 OpenAI-compatible Chat Completions API
@@ -146,6 +174,75 @@ IMAGE_GENERATION_API_KEY=sk_xxx
 
 文字聊天和图片生成可以使用不同供应商。例如：`CODEX_MODE=openai_compatible` + `OPENAI_COMPAT_PROVIDER=qhaigc` 负责文字，`IMAGE_GENERATION_PROVIDER=xingwan` 负责生图。
 
+### 飞书语音和文字写入 Obsidian
+
+语音笔记只接受白名单中的机器人私聊。事件先持久化到本地队列，飞书回调会立即完成；后台随后下载音频、使用 whisper.cpp 本地转写、追加到当天的 Markdown，并回复保存结果。音频和转写临时文件处理后会删除，任务成功后队列记录不会保留正文。
+
+文字笔记使用同一份私聊白名单和持久化队列，不经过音频下载或转写。待处理或失败重试期间，正文仅保存在本机权限为 `0600` 的任务文件中，成功后会从任务记录中移除。发送以下任一命令即可：
+
+```text
+/note 今天陪孩子去公园了。
+/n 今天完成了半小时运动。
+```
+
+语音和文字按 `Asia/Shanghai` 时区合并到当天的同一个文件，不同时间的记录以二级标题区分：
+
+```markdown
+# 每日口述 2026-08-01
+
+## 09:15
+上午整理了今天的安排。
+
+## 14:40
+下午完成了半小时运动。
+```
+
+语音转文字在 Mac 本地完成：飞书提供语音消息事件和音频文件，FFmpeg 负责转换音频格式，whisper.cpp 负责运行基于 OpenAI Whisper 的本地模型。当前没有文字转语音功能，也不会把语音正文发送到云端转写服务。
+
+安装本地依赖：
+
+```bash
+brew install whisper-cpp ffmpeg
+```
+
+从 whisper.cpp 官方模型仓库下载中文效果更好的量化模型：
+
+```bash
+mkdir -p models
+curl -L --fail --output models/ggml-large-v3-turbo-q5_0.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+```
+
+配置示例：
+
+```env
+VOICE_NOTES_ENABLED=true
+OBSIDIAN_VAULT_PATH=/Users/kevin/Documents/Obsidian Vault
+VOICE_NOTE_RELATIVE_DIR=00_Inbox/feishu/每日口述
+VOICE_NOTE_ALLOWED_CHAT_IDS=oc_xxx
+VOICE_NOTE_TIME_ZONE=Asia/Shanghai
+VOICE_NOTE_QUEUE_DIR=.data/voice-note-jobs
+VOICE_NOTE_LANGUAGE=zh
+VOICE_NOTE_INITIAL_PROMPT=这是一段飞书口述笔记，内容涉及 Obsidian、Codex、每周复盘和生活笔记。
+FFMPEG_COMMAND=/opt/homebrew/bin/ffmpeg
+WHISPER_COMMAND=/opt/homebrew/bin/whisper-cli
+WHISPER_MODEL_PATH=/absolute/path/to/models/ggml-large-v3-turbo-q5_0.bin
+```
+
+`VOICE_NOTE_ALLOWED_CHAT_IDS` 必须显式配置；为空时所有语音都会被拒绝。当前仅接收私聊语音，群聊语音不会写入笔记。默认输出到：
+
+```text
+00_Inbox/feishu/每日口述/YYYY-MM-DD.md
+```
+
+飞书下载消息音频需要应用具有“获取单聊、群组消息”或等价权限。接口和 `type=file` 参数说明见飞书官方文档：
+
+https://open.feishu.cn/document/server-docs/im-v1/message/get-2?lang=zh-CN
+
+whisper.cpp 的安装、模型和 CLI 参数说明：
+
+https://github.com/ggml-org/whisper.cpp/blob/master/README.md
+
 3. 启动服务
 
 ```bash
@@ -174,6 +271,13 @@ node --env-file=.env src/server.mjs
 
 ```text
 /codex 帮我总结今天这个仓库要做什么
+```
+
+把文字记入当天的 Obsidian 文件：
+
+```text
+/note 今天需要复盘和孩子沟通时的耐心。
+/n 晚上散步三十分钟，状态不错。
 ```
 
 `/codex` 的作用是防止群聊里普通聊天误触发本地 Codex。默认 `FEISHU_TRIGGER_MODE=mention_or_prefix` 下，私聊无需前缀，群聊 `@机器人` 无需前缀，`/codex` 仍然可用。
@@ -301,9 +405,41 @@ logs/launchd.out.log
 logs/launchd.err.log
 ```
 
-## 后续建议
+## 版本管理
 
-- 给危险命令加二次确认
-- 给每条消息加用户白名单
-- 加队列，避免同一聊天并发打爆本地服务
-- 如果你的 Codex 服务不是 HTTP，而是 CLI 或 WebSocket，再把适配层改成对应协议即可
+项目使用 [Semantic Versioning](https://semver.org/)：
+
+- `MAJOR`：不兼容的配置、命令或存储格式变化。
+- `MINOR`：向后兼容的新能力。
+- `PATCH`：向后兼容的问题修复。
+- `0.x` 阶段用于验证产品方向；如必须调整配置约定，会在 [CHANGELOG.md](./CHANGELOG.md) 中提供迁移说明。
+- 每个正式版本从 `main` 的已验证提交创建 `vMAJOR.MINOR.PATCH` 标签和 GitHub Release，版本号以 Git 标签为准。
+
+## 路线图
+
+路线图表达方向，不承诺固定日期；每个版本仍以可独立使用、可安全回滚为发布门槛。
+
+### `v0.1`：可靠捕捉（当前版本）
+
+- 飞书语音本地转写与 `/note`、`/n` 文字记录。
+- 持久化队列、消息去重、同日单文件与分时记录。
+- Codex 文本助手、图片生成和 macOS 登录自启。
+
+### `v0.2`：更好复盘
+
+- 可配置的每日笔记模板和 Frontmatter。
+- 每周复盘索引与待归档提醒。
+- 在不自动移动原始记录的前提下，辅助建议家庭育儿、健康、技能学习或生活随笔分类。
+
+### `v0.3`：可运维与可分享
+
+- 一键安装、配置检查、升级与故障诊断。
+- 队列状态、失败重试和更清晰的本地运行指标。
+- Codex 高风险操作确认、发送者级白名单和并发控制。
+- 为公开发布补齐许可证选择、贡献指南和安全报告流程。
+
+### `v1.0`：稳定个人知识入口
+
+- 稳定的配置、命令和 Markdown 存储约定。
+- 可验证的升级与回滚流程，以及长期运行文档。
+- 在保持本地优先与开放格式的前提下，支持更多消息入口和知识库目标。
