@@ -30,6 +30,38 @@ export function extractTextMessage(eventBody) {
   }
 }
 
+export function extractAudioMessage(eventBody) {
+  const event = eventBody?.event || eventBody;
+  const message = event?.message;
+
+  if (!message || message.message_type !== "audio") {
+    return null;
+  }
+
+  try {
+    const content = JSON.parse(message.content);
+    const createdAtMs = Number(message.create_time || eventBody?.header?.create_time || 0);
+
+    if (!message.message_id || !message.chat_id || !content.file_key) {
+      return null;
+    }
+
+    return {
+      chatId: message.chat_id,
+      messageId: message.message_id,
+      chatType: message.chat_type,
+      fileKey: content.file_key,
+      durationMs: Number(content.duration || 0),
+      createdAtMs: Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now(),
+      senderOpenId: event?.sender?.sender_id?.open_id || "",
+      eventId: eventBody?.header?.event_id || event?.event_id || "",
+      eventType: eventBody?.header?.event_type || event?.event_type || ""
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function isUrlVerification(payload) {
   return payload?.type === "url_verification" && typeof payload?.challenge === "string";
 }
