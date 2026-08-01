@@ -148,6 +148,8 @@ export function loadConfig(env = process.env) {
     ffmpegCommand: env.FFMPEG_COMMAND || "ffmpeg",
     whisperCommand: env.WHISPER_COMMAND || "whisper-cli",
     whisperModelPath: env.WHISPER_MODEL_PATH || "",
+    voiceNoteLanguage: env.VOICE_NOTE_LANGUAGE || "zh",
+    voiceNoteDownloadTimeoutMs: parseNumber(env.VOICE_NOTE_DOWNLOAD_TIMEOUT_MS, 60 * 1000),
     voiceNoteTranscribeTimeoutMs: parseNumber(env.VOICE_NOTE_TRANSCRIBE_TIMEOUT_MS, 30 * 60 * 1000),
     codexCliCommand: env.CODEX_CLI_COMMAND || "codex",
     codexCliArgs: parseList(env.CODEX_CLI_ARGS),

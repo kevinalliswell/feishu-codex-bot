@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.mjs";
-import { extractAudioMessage } from "../src/feishu.mjs";
+import { downloadFeishuMessageResource, extractAudioMessage } from "../src/feishu.mjs";
 import { appendVoiceNote } from "../src/obsidian-writer.mjs";
+import { transcribeAudio } from "../src/transcription-adapter.mjs";
+import { createVoiceNoteQueue } from "../src/voice-note-queue.mjs";
 
 test("loadConfig parses voice-note settings", () => {
   const config = loadConfig({
@@ -20,6 +22,7 @@ test("loadConfig parses voice-note settings", () => {
     FFMPEG_COMMAND: "/opt/homebrew/bin/ffmpeg",
     WHISPER_COMMAND: "/opt/homebrew/bin/whisper-cli",
     WHISPER_MODEL_PATH: "/tmp/ggml-small.bin",
+    VOICE_NOTE_LANGUAGE: "zh",
     VOICE_NOTE_TRANSCRIBE_TIMEOUT_MS: "90000"
   });
 
@@ -34,6 +37,7 @@ test("loadConfig parses voice-note settings", () => {
   assert.equal(config.ffmpegCommand, "/opt/homebrew/bin/ffmpeg");
   assert.equal(config.whisperCommand, "/opt/homebrew/bin/whisper-cli");
   assert.equal(config.whisperModelPath, "/tmp/ggml-small.bin");
+  assert.equal(config.voiceNoteLanguage, "zh");
   assert.equal(config.voiceNoteTranscribeTimeoutMs, 90000);
 });
 
@@ -129,5 +133,152 @@ test("appendVoiceNote rejects paths outside the configured vault", async () => {
     }), /inside the Obsidian vault/);
   } finally {
     await rm(vaultPath, { recursive: true, force: true });
+  }
+});
+
+test("downloadFeishuMessageResource downloads the audio resource with a bounded size", async () => {
+  const calls = [];
+  const bytes = Buffer.from("fake-opus-audio");
+
+  const result = await downloadFeishuMessageResource(
+    {
+      feishuAppId: "cli_test",
+      feishuAppSecret: "secret"
+    },
+    {
+      messageId: "om_audio_3",
+      fileKey: "file_audio_3",
+      maxBytes: 1024
+    },
+    {
+      accessTokenProvider: async () => "tenant-token",
+      fetchImpl: async (url, options) => {
+        calls.push({ url, options });
+        return new Response(bytes, {
+          status: 200,
+          headers: {
+            "Content-Length": String(bytes.length),
+            "Content-Type": "audio/ogg"
+          }
+        });
+      }
+    }
+  );
+
+  assert.deepEqual(result.bytes, bytes);
+  assert.equal(result.contentType, "audio/ogg");
+  assert.equal(
+    calls[0].url,
+    "https://open.feishu.cn/open-apis/im/v1/messages/om_audio_3/resources/file_audio_3?type=file"
+  );
+  assert.equal(calls[0].options.headers.Authorization, "Bearer tenant-token");
+});
+
+test("downloadFeishuMessageResource rejects resources above the configured limit", async () => {
+  await assert.rejects(() => downloadFeishuMessageResource(
+    {},
+    {
+      messageId: "om_audio_4",
+      fileKey: "file_audio_4",
+      maxBytes: 4
+    },
+    {
+      accessTokenProvider: async () => "tenant-token",
+      fetchImpl: async () => new Response(Buffer.from("too large"), {
+        status: 200,
+        headers: {
+          "Content-Length": "9",
+          "Content-Type": "audio/ogg"
+        }
+      })
+    }
+  ), /exceeds the configured limit/);
+});
+
+test("transcribeAudio converts input to WAV and reads whisper.cpp text output", async () => {
+  const testDir = await mkdtemp(join(tmpdir(), "voice-note-transcribe-"));
+  const modelPath = join(testDir, "ggml-small.bin");
+  const commands = [];
+
+  try {
+    await writeFile(modelPath, "model-placeholder");
+
+    const transcript = await transcribeAudio(
+      {
+        ffmpegCommand: "ffmpeg-test",
+        whisperCommand: "whisper-test",
+        whisperModelPath: modelPath,
+        voiceNoteLanguage: "zh",
+        voiceNoteTranscribeTimeoutMs: 90_000
+      },
+      Buffer.from("fake-audio"),
+      {
+        runCommand: async (command, args) => {
+          commands.push({ command, args });
+
+          if (command === "whisper-test") {
+            const outputBase = args[args.indexOf("-of") + 1];
+            await writeFile(`${outputBase}.txt`, "今天记录了一件重要的事情。\n", "utf8");
+          }
+        }
+      }
+    );
+
+    assert.equal(transcript, "今天记录了一件重要的事情。");
+    assert.equal(commands[0].command, "ffmpeg-test");
+    assert.equal(commands[0].args[commands[0].args.indexOf("-ar") + 1], "16000");
+    assert.equal(commands[0].args[commands[0].args.indexOf("-ac") + 1], "1");
+    assert.equal(commands[0].args[commands[0].args.indexOf("-c:a") + 1], "pcm_s16le");
+    assert.match(commands[0].args.at(-1), /\.wav$/);
+    assert.equal(commands[1].command, "whisper-test");
+    assert.ok(commands[1].args.includes("-otxt"));
+    assert.ok(commands[1].args.includes("-nt"));
+    assert.equal(commands[1].args[commands[1].args.indexOf("-l") + 1], "zh");
+  } finally {
+    await rm(testDir, { recursive: true, force: true });
+  }
+});
+
+test("createVoiceNoteQueue persists jobs and processes each message once", async () => {
+  const queueDir = await mkdtemp(join(tmpdir(), "voice-note-queue-"));
+  const processed = [];
+  const job = {
+    messageId: "om_audio_5",
+    chatId: "oc_owner",
+    chatType: "p2p",
+    fileKey: "file_audio_5",
+    durationMs: 5000,
+    createdAtMs: Date.parse("2026-08-01T13:35:00.000Z")
+  };
+
+  try {
+    const queue = createVoiceNoteQueue({
+      queueDir,
+      processJob: async (queuedJob) => {
+        processed.push(queuedJob.messageId);
+      }
+    });
+
+    const first = await queue.enqueue(job);
+    await queue.drain();
+    const second = await queue.enqueue(job);
+    await queue.drain();
+
+    const storedJob = JSON.parse(await readFile(join(queueDir, "om_audio_5.json"), "utf8"));
+    const restartedQueue = createVoiceNoteQueue({
+      queueDir,
+      processJob: async (queuedJob) => {
+        processed.push(`restarted:${queuedJob.messageId}`);
+      }
+    });
+    await restartedQueue.drain();
+
+    assert.equal(first.queued, true);
+    assert.equal(second.queued, false);
+    assert.deepEqual(processed, ["om_audio_5"]);
+    assert.equal(storedJob.status, "done");
+    assert.equal(storedJob.fileKey, undefined);
+  } finally {
+    await rm(queueDir, { recursive: true, force: true });
   }
 });
