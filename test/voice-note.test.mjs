@@ -358,6 +358,59 @@ test("createVoiceNoteQueue persists and processes text-note jobs", async () => {
   }
 });
 
+test("createVoiceNoteQueue drains a job enqueued while another job is processing", async () => {
+  const queueDir = await mkdtemp(join(tmpdir(), "voice-note-concurrent-enqueue-"));
+  const processed = [];
+  let markFirstStarted;
+  let releaseFirst;
+  const firstStarted = new Promise((resolve) => {
+    markFirstStarted = resolve;
+  });
+  const firstCanFinish = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const firstJob = {
+    messageId: "om_concurrent_1",
+    chatId: "oc_owner",
+    chatType: "p2p",
+    fileKey: "file_concurrent_1",
+    durationMs: 5000,
+    createdAtMs: Date.parse("2026-08-01T13:35:00.000Z")
+  };
+  const secondJob = {
+    messageId: "om_concurrent_2",
+    chatId: "oc_owner",
+    chatType: "p2p",
+    fileKey: "file_concurrent_2",
+    durationMs: 5000,
+    createdAtMs: Date.parse("2026-08-01T13:36:00.000Z")
+  };
+
+  try {
+    const queue = createVoiceNoteQueue({
+      queueDir,
+      processJob: async (job) => {
+        processed.push(job.messageId);
+        if (job.messageId === firstJob.messageId) {
+          markFirstStarted();
+          await firstCanFinish;
+        }
+      }
+    });
+
+    await queue.enqueue(firstJob);
+    await firstStarted;
+    await queue.enqueue(secondJob);
+    releaseFirst();
+    await queue.drain();
+
+    assert.deepEqual(processed, [firstJob.messageId, secondJob.messageId]);
+  } finally {
+    releaseFirst();
+    await rm(queueDir, { recursive: true, force: true });
+  }
+});
+
 test("processFeishuEvent quickly queues allowed private audio messages", async () => {
   const queuedJobs = [];
   const config = loadConfig({

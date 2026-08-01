@@ -96,6 +96,7 @@ export function createVoiceNoteQueue({
 
   const resolvedQueueDir = resolve(queueDir);
   let drainingPromise = null;
+  let drainRequested = false;
 
   async function ensureQueueDir() {
     await mkdir(resolvedQueueDir, { recursive: true, mode: 0o700 });
@@ -174,16 +175,24 @@ export function createVoiceNoteQueue({
   }
 
   async function drain() {
+    drainRequested = true;
+
     if (drainingPromise) {
       return drainingPromise;
     }
 
-    drainingPromise = runDrain();
-    try {
-      return await drainingPromise;
-    } finally {
-      drainingPromise = null;
-    }
+    drainingPromise = (async () => {
+      try {
+        while (drainRequested) {
+          drainRequested = false;
+          await runDrain();
+        }
+      } finally {
+        drainingPromise = null;
+      }
+    })();
+
+    return drainingPromise;
   }
 
   return {
