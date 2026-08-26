@@ -38,12 +38,12 @@ download_verified \
   "$FFMPEG_SHA256"
 tar -xf "$BUILD_DIR/ffmpeg.tar.xz" -C "$BUILD_DIR"
 pushd "$BUILD_DIR/ffmpeg-${FFMPEG_VERSION}" >/dev/null
-FFMPEG_CROSS_ARGS=()
+FFMPEG_CROSS_ARG=""
 if [[ "$(uname -m)" != "arm64" ]]; then
-  FFMPEG_CROSS_ARGS+=(--enable-cross-compile)
+  FFMPEG_CROSS_ARG="--enable-cross-compile"
 fi
 ./configure \
-  "${FFMPEG_CROSS_ARGS[@]}" \
+  ${FFMPEG_CROSS_ARG:+"$FFMPEG_CROSS_ARG"} \
   --prefix="$BUILD_DIR/ffmpeg-install" \
   --arch=arm64 \
   --cc=clang \
@@ -108,8 +108,13 @@ cmake --build "$BUILD_DIR/whisper-build" --config Release --target whisper-cli -
 cp "$BUILD_DIR/whisper-build/bin/whisper-cli" "$OUTPUT_DIR/whisper-cli-${TARGET_TRIPLE}"
 
 for binary in \
+  "$OUTPUT_DIR/feishu-codex-sidecar-${TARGET_TRIPLE}" \
   "$OUTPUT_DIR/ffmpeg-${TARGET_TRIPLE}" \
   "$OUTPUT_DIR/whisper-cli-${TARGET_TRIPLE}"; do
+  if [[ ! -f "$binary" ]]; then
+    echo "Required sidecar is missing: $binary" >&2
+    exit 1
+  fi
   chmod 755 "$binary"
   codesign --force --sign - "$binary"
   file "$binary" | grep -q "arm64"
