@@ -38,9 +38,9 @@ jobs:
           key: release-aarch64
       - run: npm ci
       - run: npm run check
-      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
       - run: npm run sidecar:build
       - run: npm run native:build
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
       - name: Verify bundled native tools
         run: |
           for tool_path in desktop/src-tauri/binaries/*-aarch64-apple-darwin; do
