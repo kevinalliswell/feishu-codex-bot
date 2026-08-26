@@ -30,7 +30,11 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
-    "externalBin": ["binaries/feishu-codex-sidecar"],
+    "externalBin": [
+      "binaries/feishu-codex-sidecar",
+      "binaries/ffmpeg",
+      "binaries/whisper-cli"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

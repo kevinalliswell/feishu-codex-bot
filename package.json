@@ -9,12 +9,15 @@
     "desktop:dev": "vite --config desktop/vite.config.ts",
     "desktop:build": "tsc -p desktop/tsconfig.json --noEmit && vite build --config desktop/vite.config.ts",
     "desktop:test": "vitest run --config desktop/vitest.config.ts",
-    "tauri:dev": "tauri dev --config desktop/src-tauri/tauri.conf.json",
-    "tauri:build": "npm run sidecar:build && tauri build --config desktop/src-tauri/tauri.conf.json",
+    "tauri:dev": "npm run sidecar:build && npm run native:prepare-dev && tauri dev --config desktop/src-tauri/tauri.conf.json",
+    "tauri:build": "npm run sidecar:build && npm run native:build && tauri build --config desktop/src-tauri/tauri.conf.json",
     "sidecar:bundle": "node scripts/bundle-sidecar.mjs",
     "sidecar:build": "node scripts/build-sidecar.mjs",
+    "native:prepare-dev": "node scripts/prepare-native-dev.mjs",
+    "native:build": "bash scripts/build-native-sidecars.sh",
     "lint": "eslint desktop/src scripts --max-warnings=0",
-    "test": "node --test && npm run desktop:test",
+    "test:node": "node --test test/*.test.mjs",
+    "test": "npm run test:node && npm run desktop:test",
     "check": "node --check src/server.mjs && npm run lint && npm run test && npm run desktop:build"
   },
   "dependencies": {
