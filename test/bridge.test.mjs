@@ -23,6 +23,7 @@ test("loadConfig parses lists and booleans", () => {
     QHAIGC_API_KEY: "qhaigc-test-key",
     XINGWAN_API_KEY: "xingwan-test-key",
     IMAGE_GENERATION_PROVIDER: "xingwan",
+    DESKTOP_CODEX_ACCESS: "write",
     CODEX_EXEC_WORKDIR: "/tmp/project",
     CODEX_CLI_ARGS: "--json,--quiet",
     CODEX_EXEC_ARGS: "exec,--skip-git-repo-check,--dangerously-bypass-approvals-and-sandbox"
@@ -47,10 +48,10 @@ test("loadConfig parses lists and booleans", () => {
   assert.deepEqual(config.codexCliArgs, ["--json", "--quiet"]);
   assert.deepEqual(config.codexExecArgs, [
     "exec",
-    "--skip-git-repo-check",
-    "--dangerously-bypass-approvals-and-sandbox"
+    "--skip-git-repo-check"
   ]);
   assert.equal(config.codexExecWorkdir, "/tmp/project");
+  assert.equal(config.desktopCodexAccess, "write");
 });
 
 test("isUrlVerification detects challenge payload", () => {
@@ -89,7 +90,8 @@ test("extractTextMessage parses text events", () => {
     eventId: "evt_1",
     eventType: "im.message.receive_v1",
     token: "",
-    mentions: []
+    mentions: [],
+    senderOpenId: ""
   });
 });
 
@@ -115,8 +117,49 @@ test("extractTextMessage parses long connection events", () => {
     eventId: "evt_ws",
     eventType: "im.message.receive_v1",
     token: "token_1",
-    mentions: []
+    mentions: [],
+    senderOpenId: ""
   });
+});
+
+test("desktop write Codex requests require local approval", async () => {
+  const approvals = [];
+  const result = await processFeishuTextEvent(
+    loadConfig({
+      COMMAND_PREFIX: "/codex",
+      CODEX_MODE: "mock",
+      CODEX_EXEC_WORKDIR: "/tmp/project",
+      DESKTOP_CODEX_ACCESS: "write",
+      MOCK_FEISHU_SEND: "true",
+      FEISHU_DELIVERY_MODE: "long_connection"
+    }),
+    {
+      event_id: "evt_write_approval",
+      event_type: "im.message.receive_v1",
+      sender: { sender_id: { open_id: "ou_owner" } },
+      message: {
+        message_id: "om_write_approval",
+        chat_id: "oc_owner",
+        chat_type: "p2p",
+        message_type: "text",
+        content: JSON.stringify({ text: "/codex 更新 README" })
+      }
+    },
+    {
+      requestCodexApproval: async (approval) => {
+        approvals.push(approval);
+        return false;
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, "codex write rejected");
+  assert.deepEqual(approvals, [{
+    requester: "ou_owner",
+    prompt: "更新 README",
+    rootPath: "/tmp/project"
+  }]);
 });
 
 test("processFeishuTextEvent accepts command after bot mention", async () => {

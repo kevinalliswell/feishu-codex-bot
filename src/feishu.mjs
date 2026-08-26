@@ -23,7 +23,8 @@ export function extractTextMessage(eventBody) {
       eventId: eventBody?.header?.event_id || event?.event_id || "",
       eventType: eventBody?.header?.event_type || event?.event_type || "",
       token: eventBody?.token || event?.token || "",
-      mentions: message.mentions || []
+      mentions: message.mentions || [],
+      senderOpenId: event?.sender?.sender_id?.open_id || ""
     };
   } catch {
     return null;

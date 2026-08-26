@@ -24,6 +24,15 @@ function parseNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function safeCodexExecArgs(value) {
+  return parseList(value || "exec,--skip-git-repo-check").map((argument) => {
+    if (argument === "danger-full-access") {
+      return "read-only";
+    }
+    return argument;
+  }).filter((argument) => !argument.startsWith("--dangerously-bypass-"));
+}
+
 function resolveGitRoot(fallbackDir) {
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     cwd: fallbackDir,
@@ -157,8 +166,9 @@ export function loadConfig(env = process.env) {
     codexCliTimeoutMs: parseNumber(env.CODEX_CLI_TIMEOUT_MS, 10 * 60 * 1000),
     codexExecCommand: env.CODEX_EXEC_COMMAND || "codex",
     codexExecWorkdir: env.CODEX_EXEC_WORKDIR || defaultCodexWorkdir,
-    codexExecArgs: parseList(env.CODEX_EXEC_ARGS || "exec,--skip-git-repo-check"),
+    codexExecArgs: safeCodexExecArgs(env.CODEX_EXEC_ARGS),
     codexExecTimeoutMs: parseNumber(env.CODEX_EXEC_TIMEOUT_MS, 10 * 60 * 1000),
+    desktopCodexAccess: env.DESKTOP_CODEX_ACCESS === "write" ? "write" : "read",
     mockFeishuSend: parseBool(env.MOCK_FEISHU_SEND, false)
   };
 }

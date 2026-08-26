@@ -172,7 +172,7 @@ function logSkip(reason, textMessage, extra = {}) {
   logMessage("skip", {
     ...buildMessageLogContext(textMessage),
     reason,
-    text: summarizeText(textMessage.text),
+    textChars: String(textMessage.text || "").length,
     ...extra
   });
 }
@@ -247,7 +247,7 @@ function extractMessageCreatedAtMs(payload) {
   return Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now();
 }
 
-export async function processFeishuEvent(config, payload, { voiceNoteQueue } = {}) {
+export async function processFeishuEvent(config, payload, { voiceNoteQueue, requestCodexApproval } = {}) {
   if (!verifyWebhookToken(config, payload)) {
     logSkip("invalid verification token", null, { deliveryMode: config.feishuDeliveryMode });
     return failure("invalid verification token", 403, { skipped: "invalid verification token" });
@@ -259,7 +259,7 @@ export async function processFeishuEvent(config, payload, { voiceNoteQueue } = {
     const textNote = textMessage ? extractTextNote(textMessage.text) : null;
 
     if (textNote === null) {
-      return processFeishuTextEvent(config, payload);
+      return processFeishuTextEvent(config, payload, { requestCodexApproval });
     }
 
     if (!config.voiceNotesEnabled) {
@@ -341,7 +341,7 @@ export async function processFeishuEvent(config, payload, { voiceNoteQueue } = {
   });
 }
 
-export async function processFeishuTextEvent(config, payload) {
+export async function processFeishuTextEvent(config, payload, { requestCodexApproval } = {}) {
   if (!verifyWebhookToken(config, payload)) {
     logSkip("invalid verification token", null, { deliveryMode: config.feishuDeliveryMode });
     return failure("invalid verification token", 403, { skipped: "invalid verification token" });
@@ -356,7 +356,7 @@ export async function processFeishuTextEvent(config, payload) {
 
   logMessage("receive", {
     ...buildMessageLogContext(textMessage),
-    text: summarizeText(textMessage.text)
+    textChars: textMessage.text.length
   });
 
   if (rememberEvent(textMessage.eventId)) {
@@ -386,8 +386,7 @@ export async function processFeishuTextEvent(config, payload) {
       logMessage("image-start", {
         ...buildMessageLogContext(textMessage),
         provider: config.imageGenerationProvider,
-        model: config.imageGenerationModel,
-        prompt: summarizeText(imageRequest.prompt)
+        model: config.imageGenerationModel
       });
 
       const image = await generateImage(config, imageRequest.prompt);
@@ -395,8 +394,7 @@ export async function processFeishuTextEvent(config, payload) {
       logMessage("image-done", {
         ...buildMessageLogContext(textMessage),
         bytes: image.bytes.length,
-        mimeType: image.mimeType,
-        revisedPrompt: summarizeText(image.revisedPrompt)
+        mimeType: image.mimeType
       });
 
       const imageKey = await uploadFeishuImage(config, image);
@@ -415,17 +413,28 @@ export async function processFeishuTextEvent(config, payload) {
 
     logMessage("codex-start", {
       ...buildMessageLogContext(textMessage),
-      codexMode: config.codexMode,
-      prompt: summarizeText(prompt)
+      codexMode: config.codexMode
     });
+
+    if (config.desktopCodexAccess === "write" && requestCodexApproval) {
+      await sendFeishuTextMessage(config, textMessage.chatId, "这项任务需要写入本机目录，已发送到 Mac 等待确认。");
+      const approved = await requestCodexApproval({
+        requester: textMessage.senderOpenId || textMessage.chatId,
+        prompt,
+        rootPath: config.codexExecWorkdir
+      });
+      if (!approved) {
+        await sendFeishuTextMessage(config, textMessage.chatId, "本机写入授权已拒绝或超时，任务没有执行。");
+        return skip("codex write rejected");
+      }
+    }
 
     const output = await runCodex(config, prompt, textMessage);
     const replyText = String(output).trim() || "Codex returned empty output.";
 
     logMessage("codex-done", {
       ...buildMessageLogContext(textMessage),
-      outputChars: replyText.length,
-      outputPreview: summarizeText(replyText)
+      outputChars: replyText.length
     });
 
     const sendResult = await sendFeishuTextMessage(config, textMessage.chatId, replyText);
