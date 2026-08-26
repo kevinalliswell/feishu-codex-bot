@@ -15,6 +15,15 @@ export function buildDesktopEnvironment(config, secrets, paths) {
   const root = config.codex?.roots?.[0];
   const codexAccess = root?.access === "write" ? "workspace-write" : "read-only";
   const allowedChatIds = list(config.feishu?.allowedChatIds).join(",");
+  if (!allowedChatIds) {
+    throw new Error("Desktop mode requires at least one allowed Feishu chat");
+  }
+  if (!String(config.feishu?.appId || "") || !String(secrets.feishuAppSecret || "")) {
+    throw new Error("Desktop mode requires Feishu credentials");
+  }
+  if (!String(config.obsidian?.vaultPath || "")) {
+    throw new Error("Desktop mode requires an authorized Obsidian Vault");
+  }
 
   return {
     PORT: "0",

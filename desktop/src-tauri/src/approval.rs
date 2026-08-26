@@ -32,6 +32,29 @@ pub struct ApprovalStore {
 }
 
 impl ApprovalStore {
+    pub fn insert_external(
+        &mut self,
+        id: String,
+        requester: String,
+        prompt: String,
+        root_path: String,
+        expires_at_ms: u128,
+    ) {
+        let expires_at = SystemTime::UNIX_EPOCH
+            + Duration::from_millis(expires_at_ms.min(u64::MAX as u128) as u64);
+        self.pending.insert(
+            id.clone(),
+            PendingApproval {
+                id,
+                requester,
+                prompt,
+                root_path,
+                expires_at_ms,
+                expires_at,
+            },
+        );
+    }
+
     pub fn request(
         &mut self,
         requester: String,

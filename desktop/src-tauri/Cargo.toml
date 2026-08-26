@@ -19,6 +19,7 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 futures-util = "0.3"
 keyring = "4.1.6"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "stream", "rustls"] }
@@ -32,8 +33,16 @@ tauri-plugin-opener = "2.5.4"
 tauri-plugin-shell = "2.3.5"
 tauri-plugin-updater = "2.10.1"
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "io-util", "sync"] }
+tokio = { version = "1", features = ["fs", "io-util", "sync", "time"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false

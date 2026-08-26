@@ -56,6 +56,17 @@ test("protocol rejects unknown versions and oversized lines", () => {
   assert.throws(() => parseProtocolLine("x".repeat(1_000_001)), /too large/);
 });
 
+test("desktop bootstrap refuses an empty Feishu allowlist", () => {
+  assert.throws(
+    () => buildDesktopEnvironment(
+      { ...desktopConfig, feishu: { ...desktopConfig.feishu, allowedChatIds: [] } },
+      { feishuAppSecret: "secret" },
+      { dataDir: "/tmp", modelPath: "/tmp/model", ffmpegPath: "/tmp/ffmpeg", whisperPath: "/tmp/whisper" }
+    ),
+    /allowed Feishu chat/
+  );
+});
+
 test("approval coordinator resolves a pending write once", async () => {
   const events = [];
   const coordinator = createApprovalCoordinator((event) => events.push(event), { timeoutMs: 1000 });
