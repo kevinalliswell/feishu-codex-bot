@@ -50,17 +50,32 @@ jobs:
               exit 1
             fi
           done
+      - name: Configure optional Apple signing and notarization
+        env:
+          APPLE_CERTIFICATE_VALUE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD_VALUE: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID_VALUE: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_VALUE: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID_VALUE: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          export_if_configured() {
+            local name="$1"
+            local value="$2"
+            if [[ -n "$value" ]]; then
+              printf '%s<<FEISHU_CODEX_VALUE\n%s\nFEISHU_CODEX_VALUE\n' "$name" "$value" >> "$GITHUB_ENV"
+            fi
+          }
+          export_if_configured APPLE_CERTIFICATE "$APPLE_CERTIFICATE_VALUE"
+          export_if_configured APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD_VALUE"
+          export_if_configured APPLE_ID "$APPLE_ID_VALUE"
+          export_if_configured APPLE_PASSWORD "$APPLE_PASSWORD_VALUE"
+          export_if_configured APPLE_TEAM_ID "$APPLE_TEAM_ID_VALUE"
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tauriScript: npx tauri
           args: --config desktop/src-tauri/tauri.conf.json --target aarch64-apple-darwin
