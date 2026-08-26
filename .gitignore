@@ -10,3 +10,4 @@ models/*.bin
 *.log
 *.pem
 *.key
+.DS_Store
