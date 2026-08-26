@@ -9,7 +9,7 @@ use feishu_codex_desktop::{
     model::verify_sha256,
     paths::{canonicalize_authorized_directory, resolve_note_path},
     secrets::SecretKind,
-    sidecar::push_ndjson_frames,
+    sidecar::{push_ndjson_frames, redact_log_message},
 };
 use tempfile::tempdir;
 
@@ -163,4 +163,14 @@ fn sidecar_protocol_handles_partial_and_multiple_frames() {
     assert_eq!(frames.len(), 2);
     assert_eq!(frames[0]["type"], "status");
     assert_eq!(frames[1]["type"], "log");
+}
+
+#[test]
+fn desktop_logs_redact_common_credential_shapes() {
+    let redacted =
+        redact_log_message("authorization Bearer secret-token api_key=sk-test sk-123456789012345");
+
+    assert!(!redacted.contains("secret-token"));
+    assert!(!redacted.contains("sk-test"));
+    assert!(!redacted.contains("123456789012345"));
 }

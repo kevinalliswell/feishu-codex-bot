@@ -59,6 +59,24 @@ where
     }
 
     let partial = models_dir.join(format!("{MODEL_NAME}.part"));
+    if tokio::fs::metadata(&partial)
+        .await
+        .map(|metadata| metadata.len() == MODEL_SIZE)
+        .unwrap_or(false)
+    {
+        if verify_sha256(&partial, MODEL_SHA256)? {
+            tokio::fs::rename(&partial, &destination)
+                .await
+                .map_err(|error| error.to_string())?;
+            progress(ModelProgress {
+                downloaded_bytes: MODEL_SIZE,
+                total_bytes: MODEL_SIZE,
+                state: "ready",
+            });
+            return Ok(destination);
+        }
+        tokio::fs::remove_file(&partial).await.ok();
+    }
     let client = reqwest::Client::builder()
         .user_agent("Feishu-Codex/0.2")
         .redirect(reqwest::redirect::Policy::limited(5))
@@ -120,6 +138,7 @@ where
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .mode(0o600)
         .append(resumed)
         .truncate(!resumed)
         .open(partial)

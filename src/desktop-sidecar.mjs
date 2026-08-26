@@ -48,7 +48,9 @@ export function buildDesktopEnvironment(config, secrets, paths) {
     CODEX_EXEC_WORKDIR: String(root?.path || ""),
     CODEX_EXEC_ARGS: `exec,--skip-git-repo-check,--sandbox,${codexAccess}`,
     OPENAI_COMPAT_API_KEY: String(secrets.assistantApiKey || ""),
-    OPENAI_COMPAT_BASE_URL: String(config.image?.baseUrl || ""),
+    OPENAI_COMPAT_PROVIDER: String(config.codex?.provider || "custom"),
+    OPENAI_COMPAT_BASE_URL: String(config.codex?.baseUrl || ""),
+    OPENAI_COMPAT_MODEL: String(config.codex?.model || ""),
     IMAGE_GENERATION_PROVIDER: String(config.image?.provider || "custom"),
     IMAGE_GENERATION_API_KEY: String(secrets.imageApiKey || ""),
     IMAGE_GENERATION_BASE_URL: String(config.image?.baseUrl || ""),
@@ -109,7 +111,11 @@ function writeMessage(message) {
 }
 
 function safeLog(value) {
-  return String(value || "").replace(/(secret|token|api[_-]?key)=[^\s,]+/gi, "$1=[redacted]").slice(0, 2_000);
+  return String(value || "")
+    .replace(/(secret|token|api[_-]?key)=[^\s,]+/gi, "$1=[redacted]")
+    .replace(/\bBearer\s+[^\s,]+/gi, "Bearer [redacted]")
+    .replace(/\bsk[-_][A-Za-z0-9_-]{10,}\b/g, "[redacted-api-key]")
+    .slice(0, 2_000);
 }
 
 export async function runSidecar() {

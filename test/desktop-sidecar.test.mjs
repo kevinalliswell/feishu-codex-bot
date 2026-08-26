@@ -21,6 +21,9 @@ const desktopConfig = {
   codex: {
     enabled: true,
     mode: "codex_exec",
+    provider: "custom",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-5.4-mini",
     roots: [{ path: "/Users/example/project", access: "write" }]
   },
   image: {
@@ -48,6 +51,8 @@ test("desktop bootstrap maps configuration without dangerous Codex flags", () =>
   assert.equal(env.VOICE_NOTE_ALLOWED_CHAT_IDS, "oc_owner");
   assert.equal(env.CODEX_EXEC_WORKDIR, "/Users/example/project");
   assert.equal(env.CODEX_EXEC_ARGS, "exec,--skip-git-repo-check,--sandbox,workspace-write");
+  assert.equal(env.OPENAI_COMPAT_BASE_URL, "https://api.openai.com/v1");
+  assert.equal(env.OPENAI_COMPAT_MODEL, "gpt-5.4-mini");
   assert.doesNotMatch(env.CODEX_EXEC_ARGS, /dangerously|bypass/);
 });
 

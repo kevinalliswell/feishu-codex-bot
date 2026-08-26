@@ -46,7 +46,9 @@ function createFakeApi(onboardingComplete = false): DesktopApi & { saveConfig: R
     inspectLegacy: vi.fn(async () => ({ found: false, sourcePath: "", appId: "", vaultPath: "", relativeDir: "", allowedChatIds: [], hasFeishuSecret: false, hasAssistantApiKey: false, hasImageApiKey: false, launchAgentFound: false })),
     chooseLegacyEnv: vi.fn(async () => null),
     importLegacy: vi.fn(async () => config),
-    disableLegacyService: vi.fn(async () => undefined)
+    disableLegacyService: vi.fn(async () => undefined),
+    checkForUpdates: vi.fn(async () => "当前已经是最新版本。"),
+    exportDiagnostics: vi.fn(async () => null)
   };
 }
 

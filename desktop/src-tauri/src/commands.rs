@@ -81,13 +81,13 @@ pub fn save_config(
     if config.onboarding_complete {
         validate_ready_config(&config, &state.secrets)?;
     }
-    state.config.save(&config)?;
     let autostart = app.autolaunch();
-    if config.launch_at_login {
+    if config.onboarding_complete && config.launch_at_login {
         autostart.enable().map_err(|error| error.to_string())?;
-    } else {
+    } else if !config.launch_at_login {
         autostart.disable().map_err(|error| error.to_string())?;
     }
+    state.config.save(&config)?;
     Ok(config)
 }
 
@@ -139,8 +139,14 @@ pub async fn test_feishu(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub async fn download_model(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let emitter = app.clone();
+    let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
     let path = download_default_model(&state.paths.models_dir, move |progress| {
-        let _ = emitter.emit("model-progress", progress);
+        if progress.state != "downloading"
+            || last_emit.elapsed() >= std::time::Duration::from_millis(250)
+        {
+            let _ = emitter.emit("model-progress", progress);
+            last_emit = std::time::Instant::now();
+        }
     })
     .await?;
     Ok(path.to_string_lossy().into_owned())
@@ -202,6 +208,44 @@ pub fn resolve_approval(
 
 #[tauri::command]
 pub fn run_diagnostics(state: State<'_, AppState>) -> Result<DiagnosticResult, String> {
+    build_diagnostics(&state)
+}
+
+#[tauri::command]
+pub fn export_diagnostics(
+    state: State<'_, AppState>,
+    destination: String,
+) -> Result<String, String> {
+    let destination = PathBuf::from(destination);
+    if !destination.is_absolute() {
+        return Err("Diagnostic export path must be absolute".into());
+    }
+    let parent = destination.parent().ok_or("Diagnostic export has no parent")?;
+    let canonical_parent = fs::canonicalize(parent)
+        .map_err(|error| format!("Cannot access diagnostic export directory: {error}"))?;
+    let file_name = destination.file_name().ok_or("Diagnostic export needs a file name")?;
+    let destination = canonical_parent.join(file_name);
+    let report = build_diagnostics(&state)?;
+    let payload = json!({
+        "generatedAt": Utc::now().to_rfc3339(),
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "diagnostics": report
+    });
+    let temporary = canonical_parent.join(format!(".feishu-codex-diagnostics-{}.tmp", uuid::Uuid::new_v4()));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_writer_pretty(&mut file, &payload).map_err(|error| error.to_string())?;
+    file.write_all(b"\n").map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    fs::rename(&temporary, &destination).map_err(|error| error.to_string())?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+fn build_diagnostics(state: &AppState) -> Result<DiagnosticResult, String> {
     let config = state.config.load()?;
     let mut checks = Vec::new();
     let config_errors = validate_config(&config);
@@ -365,6 +409,15 @@ pub fn disable_legacy_service() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn restart_app(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        app.restart();
+    });
+    Ok(())
+}
+
 pub async fn start_if_ready(app: AppHandle) {
     let state = app.state::<AppState>();
     let Ok(config) = state.config.load() else {
@@ -461,10 +514,6 @@ async fn start_sidecar(
     state: &AppState,
     config: &AppConfig,
 ) -> Result<(), String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|error| error.to_string())?;
     let paths = BootstrapPaths {
         data_dir: state.paths.data_dir.to_string_lossy().into_owned(),
         model_path: state
@@ -473,8 +522,8 @@ async fn start_sidecar(
             .join(MODEL_NAME)
             .to_string_lossy()
             .into_owned(),
-        ffmpeg_path: bundled_tool_path(&resource_dir, "ffmpeg")?,
-        whisper_path: bundled_tool_path(&resource_dir, "whisper-cli")?,
+        ffmpeg_path: bundled_tool_path(app, "ffmpeg")?,
+        whisper_path: bundled_tool_path(app, "whisper-cli")?,
     };
     let secrets = BootstrapSecrets {
         feishu_app_secret: state
@@ -500,16 +549,30 @@ async fn start_sidecar(
             state.approvals.clone(),
             state.paths.logs_dir.join("sidecar.log"),
         )
+        .await?;
+    state
+        .sidecar
+        .wait_until_ready(std::time::Duration::from_secs(20))
         .await
 }
 
-fn bundled_tool_path(resource_dir: &Path, name: &str) -> Result<String, String> {
+fn bundled_tool_path(app: &AppHandle, name: &str) -> Result<String, String> {
     let triple = if cfg!(target_arch = "aarch64") {
         "aarch64-apple-darwin"
     } else {
         "x86_64-apple-darwin"
     };
+    let executable_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+        .unwrap_or_default();
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
     let candidates = [
+        executable_dir.join(name),
+        resource_dir.join(name),
         resource_dir.join(format!("{name}-{triple}")),
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("binaries")

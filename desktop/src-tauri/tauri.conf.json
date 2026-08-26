@@ -4,8 +4,8 @@
   "version": "0.2.0-beta.1",
   "identifier": "com.feishucodex.desktop",
   "build": {
-    "beforeDevCommand": "npm --prefix ../.. run desktop:dev",
-    "beforeBuildCommand": "npm --prefix ../.. run desktop:build",
+    "beforeDevCommand": "npm run desktop:dev",
+    "beforeBuildCommand": "npm run desktop:build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
@@ -29,6 +29,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["app", "dmg"],
     "externalBin": [
       "binaries/feishu-codex-sidecar",
@@ -45,8 +46,15 @@
     "shortDescription": "Send Feishu notes to a local Obsidian vault",
     "longDescription": "A local-first Feishu bridge for Obsidian notes, transcription and Codex workflows.",
     "macOS": {
-      "minimumSystemVersion": "12.0",
-      "signingIdentity": "-"
+      "minimumSystemVersion": "12.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERGMkVDMTJEMjRBRTM0QTUKUldTbE5LNGtMY0V1My9uUDJKZGZadHVETWw5UURvQVFQNm9JS21ZYnJ0Yld3TzVOSmJvOHJUUW0K",
+      "endpoints": [
+        "https://github.com/kevinalliswell/feishu-codex-bot/releases/download/desktop-beta/latest.json"
+      ]
     }
   }
 }

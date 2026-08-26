@@ -85,6 +85,9 @@ input:focus, select:focus { border-color: var(--teal); }
 .path-preview { margin: 16px 0 26px; padding: 13px; overflow-wrap: anywhere; color: var(--ink-soft); border-radius: var(--radius-sm); background: #efede7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .model-card, .permission-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 26px 0; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: white; }
 .model-card span, .permission-row span { display: block; margin-top: 5px; color: var(--ink-soft); font-size: 12px; }
+.download-progress { display: grid; gap: 8px; margin: -10px 0 22px; }
+.download-progress progress { accent-color: var(--accent); height: 8px; width: 100%; }
+.download-progress span { color: var(--muted); font-size: 12px; }
 .permission-row select { width: 180px; }
 .success-mark { display: grid; width: 72px; height: 72px; margin-bottom: 24px; place-items: center; color: white; border-radius: 50%; background: var(--teal); font-size: 34px; }
 

@@ -65,6 +65,23 @@ impl SidecarManager {
         self.child.lock().unwrap().is_some()
     }
 
+    pub async fn wait_until_ready(&self, timeout: Duration) -> Result<(), String> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let current = self.status();
+            if current.state == "connected" {
+                return Ok(());
+            }
+            if current.state == "error" || !current.running {
+                return Err(current.message);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err("Timed out while connecting to Feishu".into());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
     pub fn send(&self, message: Value) -> Result<(), String> {
         let line = format!(
             "{}\n",
@@ -100,6 +117,7 @@ impl SidecarManager {
             running: true,
             message: "正在连接飞书".into(),
         };
+        crate::tray::set_status_icon(app, "busy");
 
         let bootstrap = json!({
             "version": 1,
@@ -270,17 +288,17 @@ fn handle_protocol_message(
                 let _ = app.emit("approval-required", payload.clone());
             }
         }
-        Some("log") => {
-            if message.pointer("/payload/level").and_then(Value::as_str) == Some("error") {
-                let mut current = status.lock().unwrap();
-                current.message = message
-                    .pointer("/payload/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Sidecar error")
-                    .chars()
-                    .take(240)
-                    .collect();
-            }
+        Some("log")
+            if message.pointer("/payload/level").and_then(Value::as_str) == Some("error") =>
+        {
+            let mut current = status.lock().unwrap();
+            current.message = message
+                .pointer("/payload/message")
+                .and_then(Value::as_str)
+                .unwrap_or("Sidecar error")
+                .chars()
+                .take(240)
+                .collect();
         }
         _ => {}
     }
@@ -294,16 +312,42 @@ async fn append_log(path: &PathBuf, level: &str, message: &str) {
     if let Ok(mut file) = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
+        .mode(0o600)
         .open(path)
         .await
     {
-        let clean: String = message
+        let bounded: String = message
             .chars()
             .filter(|character| *character != '\0')
             .take(2_000)
             .collect();
+        let clean = redact_log_message(&bounded);
         let _ = file
             .write_all(format!("[{level}] {}\n", clean.replace('\n', " ")).as_bytes())
             .await;
     }
+}
+
+pub fn redact_log_message(message: &str) -> String {
+    let mut words = message.split_whitespace().peekable();
+    let mut output = Vec::new();
+    while let Some(word) = words.next() {
+        let lower = word.to_ascii_lowercase();
+        if lower == "bearer" {
+            output.push("Bearer [redacted]".to_string());
+            let _ = words.next();
+        } else if lower.contains("secret=")
+            || lower.contains("token=")
+            || lower.contains("api_key=")
+            || lower.contains("api-key=")
+        {
+            let label = word.split('=').next().unwrap_or("credential");
+            output.push(format!("{label}=[redacted]"));
+        } else if (word.starts_with("sk-") || word.starts_with("sk_")) && word.len() > 12 {
+            output.push("[redacted-api-key]".into());
+        } else {
+            output.push(word.to_string());
+        }
+    }
+    output.join(" ")
 }

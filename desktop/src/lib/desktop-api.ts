@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type { AppConfig, PendingApproval, RuntimeStatus, SecretStatus } from "../types";
 import { createDefaultConfig } from "./config";
 
@@ -45,6 +45,8 @@ export interface DesktopApi {
   chooseLegacyEnv(): Promise<string | null>;
   importLegacy(sourcePath: string): Promise<AppConfig>;
   disableLegacyService(): Promise<void>;
+  checkForUpdates(): Promise<string>;
+  exportDiagnostics(): Promise<string | null>;
 }
 
 function browserFallback(): DesktopApi {
@@ -118,7 +120,9 @@ function browserFallback(): DesktopApi {
     },
     async chooseLegacyEnv() { return null; },
     async importLegacy() { return structuredClone(config); },
-    async disableLegacyService() {}
+    async disableLegacyService() {},
+    async checkForUpdates() { return "浏览器预览模式没有更新服务"; },
+    async exportDiagnostics() { return null; }
   };
 }
 
@@ -149,6 +153,19 @@ export function createDesktopApi(): DesktopApi {
       return typeof selection === "string" ? selection : null;
     },
     importLegacy: (sourcePath) => invoke("import_legacy", { sourcePath }),
-    disableLegacyService: () => invoke("disable_legacy_service")
+    disableLegacyService: () => invoke("disable_legacy_service"),
+    async checkForUpdates() {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const update = await check();
+      if (!update) return "当前已经是最新版本。";
+      await update.downloadAndInstall();
+      await invoke("restart_app");
+      return `已安装 ${update.version}，正在重新启动。`;
+    },
+    async exportDiagnostics() {
+      const destination = await save({ title: "导出 Feishu Codex 诊断", defaultPath: "Feishu-Codex-diagnostics.json", filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (!destination) return null;
+      return invoke("export_diagnostics", { destination });
+    }
   };
 }

@@ -28,6 +28,9 @@ export interface AppConfig {
   codex: {
     enabled: boolean;
     mode: "codex_exec" | "openai_compatible";
+    provider: string;
+    baseUrl: string;
+    model: string;
     roots: CodexRoot[];
   };
   image: {

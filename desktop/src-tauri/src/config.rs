@@ -48,7 +48,23 @@ pub struct TranscriptionConfig {
 pub struct CodexConfig {
     pub enabled: bool,
     pub mode: String,
+    #[serde(default = "default_codex_provider")]
+    pub provider: String,
+    #[serde(default = "default_codex_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_codex_model")]
+    pub model: String,
     pub roots: Vec<CodexRoot>,
+}
+
+fn default_codex_provider() -> String {
+    "custom".into()
+}
+fn default_codex_base_url() -> String {
+    "https://api.openai.com/v1".into()
+}
+fn default_codex_model() -> String {
+    "gpt-5.4-mini".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -98,6 +114,9 @@ impl Default for AppConfig {
             codex: CodexConfig {
                 enabled: true,
                 mode: "codex_exec".into(),
+                provider: default_codex_provider(),
+                base_url: default_codex_base_url(),
+                model: default_codex_model(),
                 roots: vec![],
             },
             image: ImageConfig {

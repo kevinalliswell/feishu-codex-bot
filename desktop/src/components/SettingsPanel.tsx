@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppConfig } from "../types";
 import type { DesktopApi, DesktopSnapshot, DiagnosticResult } from "../lib/desktop-api";
 
@@ -12,24 +12,44 @@ interface Props {
 export function SettingsPanel({ section, api, snapshot, onChange }: Props) {
   const [draft, setDraft] = useState<AppConfig>(structuredClone(snapshot.config));
   const [secret, setSecret] = useState("");
+  const [imageSecret, setImageSecret] = useState("");
   const [notice, setNotice] = useState("");
   const [diagnostics, setDiagnostics] = useState<DiagnosticResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [legacyServiceFound, setLegacyServiceFound] = useState(false);
 
-  async function save(secretKind?: "feishuAppSecret" | "assistantApiKey" | "imageApiKey") {
+  useEffect(() => {
+    if (section === "diagnostics") {
+      void api.inspectLegacy().then((legacy) => setLegacyServiceFound(legacy.launchAgentFound)).catch(() => setLegacyServiceFound(false));
+    }
+  }, [api, section]);
+
+  async function save() {
     setBusy(true);
     setNotice("");
     try {
-      const hasNewSecret = Boolean(secretKind && secret);
-      if (secretKind && secret) await api.setSecret(secretKind, secret);
+      const nextSecrets = { ...snapshot.secrets };
+      if (section === "feishu" && secret) {
+        await api.setSecret("feishuAppSecret", secret);
+        nextSecrets.feishuAppSecret = true;
+      }
+      if (section === "ai" && secret) {
+        await api.setSecret("assistantApiKey", secret);
+        nextSecrets.assistantApiKey = true;
+      }
+      if (section === "ai" && imageSecret) {
+        await api.setSecret("imageApiKey", imageSecret);
+        nextSecrets.imageApiKey = true;
+      }
       const config = await api.saveConfig(draft);
       if (section === "feishu") await api.testFeishu();
       onChange({
         ...snapshot,
         config,
-        secrets: hasNewSecret && secretKind ? { ...snapshot.secrets, [secretKind]: true } : snapshot.secrets
+        secrets: nextSecrets
       });
       setSecret("");
+      setImageSecret("");
       setNotice(section === "feishu" ? "凭据测试成功，设置已保存。" : "设置已保存，重新连接后生效。");
     } catch (reason) {
       setNotice(String(reason instanceof Error ? reason.message : reason));
@@ -53,8 +73,10 @@ export function SettingsPanel({ section, api, snapshot, onChange }: Props) {
       <section className="panel settings-panel">
         <h2>诊断与更新</h2>
         <p>检查配置、钥匙串、模型、Vault 写入权限和 Sidecar。结果不会包含密钥或笔记正文。</p>
-        <div className="action-row"><button className="button primary" onClick={async () => { setBusy(true); setDiagnostics(await api.runDiagnostics()); setBusy(false); }}>{busy ? "正在检查…" : "运行完整诊断"}</button><span className="version-chip">当前版本 {snapshot.status.version}</span></div>
+        <div className="action-row"><button className="button primary" onClick={async () => { setBusy(true); setDiagnostics(await api.runDiagnostics()); setBusy(false); }}>{busy ? "正在检查…" : "运行完整诊断"}</button><button className="button secondary" disabled={busy} onClick={async () => { const path = await api.exportDiagnostics(); if (path) setNotice(`诊断已导出到 ${path}`); }}>导出诊断</button><button className="button secondary" disabled={busy} onClick={async () => { setBusy(true); try { setNotice(await api.checkForUpdates()); } catch (reason) { setNotice(String(reason)); } finally { setBusy(false); } }}>检查更新</button><span className="version-chip">当前版本 {snapshot.status.version}</span></div>
+        {legacyServiceFound && <div className="callout"><strong>检测到旧版后台服务</strong><p>请先确认新版飞书连接和 Obsidian 写入都通过，再停用旧服务，避免重复消费消息。</p><button className="button subtle" disabled={busy} onClick={async () => { setBusy(true); try { await api.disableLegacyService(); setLegacyServiceFound(false); setNotice("旧版服务已停用，原配置备份仍保留。"); } catch (reason) { setNotice(String(reason)); } finally { setBusy(false); } }}>我已验证新版，停用旧服务</button></div>}
         {diagnostics && <div className="diagnostic-list">{diagnostics.checks.map((check) => <div key={check.label}><span className={check.ok ? "check ok" : "check"}>{check.ok ? "✓" : "!"}</span><div><strong>{check.label}</strong><small>{check.detail}</small></div></div>)}</div>}
+        {notice && <p className="save-notice" role="status">{notice}</p>}
       </section>
     );
   }
@@ -64,9 +86,9 @@ export function SettingsPanel({ section, api, snapshot, onChange }: Props) {
       {section === "feishu" && <FeishuFields draft={draft} setDraft={setDraft} secret={secret} setSecret={setSecret} configured={snapshot.secrets.feishuAppSecret} />}
       {section === "obsidian" && <ObsidianFields draft={draft} setDraft={setDraft} choose={() => void choose("vault")} />}
       {section === "transcription" && <TranscriptionFields draft={draft} setDraft={setDraft} modelReady={snapshot.status.modelReady} />}
-      {section === "ai" && <AiFields draft={draft} setDraft={setDraft} secret={secret} setSecret={setSecret} configured={snapshot.secrets.imageApiKey} />}
+      {section === "ai" && <AiFields draft={draft} setDraft={setDraft} assistantSecret={secret} setAssistantSecret={setSecret} imageSecret={imageSecret} setImageSecret={setImageSecret} assistantConfigured={snapshot.secrets.assistantApiKey} imageConfigured={snapshot.secrets.imageApiKey} />}
       {section === "security" && <SecurityFields draft={draft} setDraft={setDraft} choose={() => void choose("root")} />}
-      <button className="button primary" disabled={busy} onClick={() => void save(section === "feishu" ? "feishuAppSecret" : section === "ai" ? "imageApiKey" : undefined)}>保存设置</button>
+      <button className="button primary" disabled={busy} onClick={() => void save()}>保存设置</button>
       {notice && <p className="save-notice" role="status">{notice}</p>}
     </section>
   );
@@ -86,8 +108,8 @@ function TranscriptionFields({ draft, setDraft, modelReady }: FieldsProps & { mo
   return <><h2>本地语音转写</h2><p>FFmpeg 转换格式，whisper.cpp 在本机运行模型。</p><label className="toggle-row"><span><strong>启用语音笔记</strong><small>仅接收白名单私聊语音</small></span><input type="checkbox" checked={draft.transcription.enabled} onChange={(event) => setDraft({ ...draft, transcription: { ...draft.transcription, enabled: event.target.checked } })} /></label><label>识别语言<select value={draft.transcription.language} onChange={(event) => setDraft({ ...draft, transcription: { ...draft.transcription, language: event.target.value } })}><option value="zh">中文</option><option value="en">English</option><option value="auto">自动识别</option></select></label><div className="model-card"><strong>{draft.transcription.modelName}</strong><span>{modelReady ? "模型已校验" : "模型尚未下载"}</span></div></>;
 }
 
-function AiFields({ draft, setDraft, secret, setSecret, configured }: FieldsProps & { secret: string; setSecret(value: string): void; configured: boolean }) {
-  return <><h2>Codex 与图片生成</h2><p>Codex 只响应 <code>/codex</code>，图片请求使用独立凭据。</p><label>Codex 模式<select value={draft.codex.mode} onChange={(event) => setDraft({ ...draft, codex: { ...draft.codex, mode: event.target.value as AppConfig["codex"]["mode"] } })}><option value="codex_exec">本地 Codex CLI</option><option value="openai_compatible">OpenAI-compatible API</option></select></label><label>图片 API Key<input type="password" value={secret} placeholder={configured ? "已保存到钥匙串" : "尚未配置"} onChange={(event) => setSecret(event.target.value)} /></label><label>图片模型<input value={draft.image.model} onChange={(event) => setDraft({ ...draft, image: { ...draft.image, model: event.target.value } })} /></label></>;
+function AiFields({ draft, setDraft, assistantSecret, setAssistantSecret, imageSecret, setImageSecret, assistantConfigured, imageConfigured }: FieldsProps & { assistantSecret: string; setAssistantSecret(value: string): void; imageSecret: string; setImageSecret(value: string): void; assistantConfigured: boolean; imageConfigured: boolean }) {
+  return <><h2>Codex 与图片生成</h2><p>Codex 只响应 <code>/codex</code>，文字与图片服务使用独立凭据。</p><label>Codex 模式<select value={draft.codex.mode} onChange={(event) => setDraft({ ...draft, codex: { ...draft.codex, mode: event.target.value as AppConfig["codex"]["mode"] } })}><option value="codex_exec">本地 Codex CLI</option><option value="openai_compatible">OpenAI-compatible API</option></select></label>{draft.codex.mode === "openai_compatible" && <><label>文字 API 地址<input value={draft.codex.baseUrl} onChange={(event) => setDraft({ ...draft, codex: { ...draft.codex, baseUrl: event.target.value } })} /></label><label>文字模型<input value={draft.codex.model} onChange={(event) => setDraft({ ...draft, codex: { ...draft.codex, model: event.target.value } })} /></label><label>文字 API Key<input type="password" value={assistantSecret} placeholder={assistantConfigured ? "已保存到钥匙串" : "尚未配置"} onChange={(event) => setAssistantSecret(event.target.value)} /></label></>}<label>图片 API 地址<input value={draft.image.baseUrl} onChange={(event) => setDraft({ ...draft, image: { ...draft.image, baseUrl: event.target.value } })} /></label><label>图片 API Key<input type="password" value={imageSecret} placeholder={imageConfigured ? "已保存到钥匙串" : "尚未配置"} onChange={(event) => setImageSecret(event.target.value)} /></label><label>图片模型<input value={draft.image.model} onChange={(event) => setDraft({ ...draft, image: { ...draft.image, model: event.target.value } })} /></label></>;
 }
 
 function SecurityFields({ draft, setDraft, choose }: FieldsProps & { choose(): void }) {

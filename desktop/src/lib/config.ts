@@ -17,7 +17,14 @@ export function createDefaultConfig(): AppConfig {
       language: "zh",
       modelName: "ggml-large-v3-turbo-q5_0.bin"
     },
-    codex: { enabled: true, mode: "codex_exec", roots: [] },
+    codex: {
+      enabled: true,
+      mode: "codex_exec",
+      provider: "custom",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-5.4-mini",
+      roots: []
+    },
     image: {
       enabled: true,
       provider: "xingwan",
