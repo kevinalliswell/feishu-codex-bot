@@ -1,6 +1,12 @@
 .env
-.DS_Store
-logs/
-node_modules/
+.env.local
 .data/
+node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
+desktop/.generated/
 models/*.bin
+*.log
+*.pem
+*.key

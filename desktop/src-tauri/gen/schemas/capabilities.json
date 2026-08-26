@@ -1,0 +1,1 @@
+{"main-capability":{"identifier":"main-capability","description":"Only the main configuration window can call explicitly registered commands.","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open","opener:allow-open-path","autostart:allow-enable","autostart:allow-disable","autostart:allow-is-enabled","updater:allow-check"]}}

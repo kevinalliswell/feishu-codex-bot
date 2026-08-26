@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Feishu Codex",
+  "version": "0.2.0-beta.1",
+  "identifier": "com.feishucodex.desktop",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../.. run desktop:dev",
+    "beforeBuildCommand": "npm --prefix ../.. run desktop:build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Feishu Codex",
+        "width": 1120,
+        "height": 760,
+        "minWidth": 900,
+        "minHeight": 640,
+        "center": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Send Feishu notes to a local Obsidian vault",
+    "longDescription": "A local-first Feishu bridge for Obsidian notes, transcription and Codex workflows.",
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-"
+    }
+  }
+}
