@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
-  echo "Native sidecars must be built on Apple Silicon macOS." >&2
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "Native sidecars must be built on macOS." >&2
   exit 1
 fi
 
@@ -38,7 +38,12 @@ download_verified \
   "$FFMPEG_SHA256"
 tar -xf "$BUILD_DIR/ffmpeg.tar.xz" -C "$BUILD_DIR"
 pushd "$BUILD_DIR/ffmpeg-${FFMPEG_VERSION}" >/dev/null
+FFMPEG_CROSS_ARGS=()
+if [[ "$(uname -m)" != "arm64" ]]; then
+  FFMPEG_CROSS_ARGS+=(--enable-cross-compile)
+fi
 ./configure \
+  "${FFMPEG_CROSS_ARGS[@]}" \
   --prefix="$BUILD_DIR/ffmpeg-install" \
   --arch=arm64 \
   --cc=clang \

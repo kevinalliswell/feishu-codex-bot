@@ -1,194 +1,55 @@
-# Feishu Codex Bridge
+# Feishu Codex
 
-把飞书变成 Mac 上 Codex 与 Obsidian 的移动入口：在手机里随手说、随手写，内容在本机处理后自动进入当天的 Markdown，等待每周复盘时再归档到长期笔记。
-
-## 为什么做这个项目
-
-有价值的生活记录经常消失在“稍后再整理”里。这个项目把记录阶段的摩擦降到最低，同时把隐私和文件所有权留在自己手上：
-
-- **先捕捉，后整理**：当天的语音和文字先进入每日 Inbox，不在记录时打断思路做分类。
-- **本地优先**：语音通过 Mac 上的 FFmpeg 与 whisper.cpp 转写，不依赖云端语音识别服务。
-- **开放格式**：最终结果是普通 Markdown，不被某个 SaaS 或数据库锁定。
-- **可靠可追溯**：消息先进入持久化队列，按飞书消息 ID 去重；同日记录集中在一个文件并保留时间戳。
-- **兼顾行动与知识**：普通消息仍可调用 Codex，`/note` 与 `/n` 专门负责沉淀笔记。
-
-## 核心工作流
+把飞书里的随手文字和口述，安全地写进 Mac 上的 Obsidian。每天的多条记录按时间戳追加到同一个 Markdown，复盘时再整理进长期笔记。
 
 ```text
-飞书机器人私聊
-  ├─ 语音消息 ──> FFmpeg ──> whisper.cpp 本地转写 ─┐
-  └─ /note 或 /n ───────────> 文字正文 ───────────┤
-                                                   ↓
-                                            本地持久化队列
-                                                   ↓
-                       00_Inbox/feishu/每日口述/YYYY-MM-DD.md
-                                                   ↓ 每周复盘
-                         生活笔记/家庭育儿、健康、技能学习或生活随笔
+飞书私聊机器人
+  ├─ /note 或 /n ───────────────┐
+  └─ 语音 ─> FFmpeg ─> Whisper ─┤
+                                  ↓
+       00_Inbox/feishu/每日口述/YYYY-MM-DD.md
+                                  ↓ 每周复盘
+       生活笔记/家庭育儿、健康、技能学习或生活随笔
 ```
 
-记录时只负责把想法留下；分类、提炼和迁移发生在复盘阶段。这让 Inbox 保持低门槛，也让“生活笔记”只留下值得长期复用的内容。
+## macOS 桌面版
 
-## 当前实现
+`v0.2.0-beta.1` 起，Feishu Codex 是一个 Apple Silicon macOS 菜单栏 App：
 
-- 支持飞书长连接接收事件
-- 保留飞书 `webhook` 模式作为备用
-- 支持文本消息事件解析
-- 支持按 `chat_id` 白名单限制触发范围
-- 支持私聊直接触发、群聊 `@机器人` 触发，以及 `/codex` 显式命令
-- 默认用飞书互动卡片回发 Codex 结果
-- 支持 Xingwan 图片生成并把图片发回飞书
-- 支持把白名单私聊中的飞书语音在 Mac 本地转写，并写入 Obsidian 每日口述 Inbox
-- 支持在白名单私聊中用 `/note` 或 `/n` 把文字追加到同一个 Obsidian 每日口述文件
-- 支持 5 种 Codex 适配模式：
-  - `http`: 转发到本地 HTTP 服务
-  - `openai_compatible`: 调用 OpenAI-compatible Chat Completions API
-  - `cli`: 通过标准输入调用本地 CLI
-  - `codex_exec`: 原生调用 `codex exec`
-  - `mock`: 本地联调
-- 支持通过飞书机器人把结果回发到原会话
+- 下载 DMG，拖入 Applications，通过向导配置，不需要安装 Node.js、Homebrew、FFmpeg 或 whisper.cpp。
+- App Secret 和 API Key 保存在 macOS 钥匙串，不写进 `config.json`。
+- FFmpeg、whisper.cpp 和 Node bridge 都作为 arm64 Sidecar 随 App 分发。
+- Obsidian Vault 与 Codex 目录必须通过系统目录选择器授权。
+- Codex 只响应 `/codex`；具有工作区写权限的请求必须在 Mac 上逐次确认，确认五分钟后失效。
+- Beta 更新包使用独立密钥签名并强制验签。
 
-## 快速开始
+当前 Beta 使用 ad-hoc 签名，macOS 第一次打开时仍会显示 Gatekeeper 提示。请在 Finder 中右键 App，选择“打开”并再次确认。面向普通用户的 `v0.2.0` 稳定版必须完成 Apple Developer ID 签名和公证后才发布。
 
-1. 复制环境变量
+### 安装与首次配置
 
-```bash
-cp .env.example .env
-```
+1. 从 [GitHub Releases](https://github.com/kevinalliswell/feishu-codex-bot/releases) 下载 Apple Silicon DMG。
+2. 将 `Feishu Codex.app` 拖进 Applications，然后打开。
+3. 在飞书开放平台创建企业自建应用，开启机器人能力并订阅 `im.message.receive_v1`，接收方式选择长连接。
+4. 在向导中填写 App ID、App Secret 和允许的私聊 `chat_id`；App 会立即验证凭据。
+5. 选择 Obsidian Vault。默认写入 `00_Inbox/feishu/每日口述`。
+6. 下载约 548 MB 的 Whisper 模型。下载支持断点续传、SHA-256 校验和失败重试。
+7. 按需配置 Codex 工作目录、OpenAI-compatible 服务和图片生成服务，然后运行端到端自检。
 
-2. 按你的情况修改 `.env`
+所有功能都会显示在设置页。缺少模型、密钥或目录授权时，模块会明确标为“待配置”，不会伪装成可用。
 
-如果你本机装的是 Codex CLI，推荐直接用 `codex_exec`：
+### 日常使用
 
-```env
-PORT=3000
-FEISHU_APP_ID=cli_xxx
-FEISHU_APP_SECRET=xxx
-FEISHU_VERIFICATION_TOKEN=xxx
-FEISHU_ENCRYPT_KEY=
-FEISHU_DELIVERY_MODE=long_connection
-FEISHU_TRIGGER_MODE=mention_or_prefix
-FEISHU_REPLY_FORMAT=card
-COMMAND_PREFIX=/codex
-CODEX_MODE=codex_exec
-CODEX_EXEC_COMMAND=codex
-CODEX_EXEC_WORKDIR=/Users/kevin/CodeWorkSpace/garrytan-gstack
-CODEX_EXEC_ARGS=exec,--skip-git-repo-check
-```
-
-如果不填 `CODEX_EXEC_WORKDIR`，bridge 会默认取你启动服务时所在位置对应的 git 仓库根目录。
-
-如果你已经另外包了一层本地 HTTP 服务，也可以用 `http` 模式：
-
-```env
-PORT=3000
-FEISHU_APP_ID=cli_xxx
-FEISHU_APP_SECRET=xxx
-FEISHU_VERIFICATION_TOKEN=xxx
-COMMAND_PREFIX=/codex
-CODEX_MODE=http
-CODEX_HTTP_URL=http://127.0.0.1:4000/run
-```
-
-如果你想走第三方 OpenAI-compatible API：
-
-```env
-CODEX_MODE=openai_compatible
-OPENAI_COMPAT_PROVIDER=qhaigc
-QHAIGC_API_KEY=sk_xxx
-OPENAI_COMPAT_TEMPERATURE=0.2
-OPENAI_COMPAT_MAX_TOKENS=2000
-```
-
-内置供应商预设：
-
-```env
-# Xingwan: https://xingwan.store/v1, 默认模型 gpt-5.4-mini
-OPENAI_COMPAT_PROVIDER=xingwan
-XINGWAN_API_KEY=sk_xxx
-```
-
-```env
-# QHAIGC: https://api.qhaigc.net/v1, 默认模型 deepseek-chat
-OPENAI_COMPAT_PROVIDER=qhaigc
-QHAIGC_API_KEY=sk_xxx
-```
-
-切回本地 Codex CLI：
-
-```env
-CODEX_MODE=codex_exec
-```
-
-切换到第三方供应商：
-
-```env
-CODEX_MODE=openai_compatible
-OPENAI_COMPAT_PROVIDER=xingwan
-```
-
-或者：
-
-```env
-CODEX_MODE=openai_compatible
-OPENAI_COMPAT_PROVIDER=qhaigc
-```
-
-切换后重启服务：
-
-```bash
-launchctl kickstart -k gui/$(id -u)/com.kevin.feishu-codex
-```
-
-如果供应商的完整接口不是 `BASE_URL/chat/completions`，或你想覆盖默认模型，可以直接设置：
-
-```env
-OPENAI_COMPAT_BASE_URL=https://example.com/v1
-OPENAI_COMPAT_CHAT_COMPLETIONS_URL=https://example.com/custom/chat/completions
-OPENAI_COMPAT_MODEL=your-model
-```
-
-注意：`openai_compatible` 模式适合普通问答、总结、生成文本。它不会像本地 `codex_exec` 一样直接读写本地仓库或执行 shell 命令。
-
-图片生成走单独配置，默认使用 Xingwan 的 `gpt-image-2`：
-
-```env
-IMAGE_GENERATION_PROVIDER=xingwan
-XINGWAN_API_KEY=sk_xxx
-IMAGE_GENERATION_MODEL=gpt-image-2
-IMAGE_GENERATION_SIZE=1024x1024
-```
-
-如果想给图片生成单独使用另一把 key，也可以设置：
-
-```env
-IMAGE_GENERATION_API_KEY=sk_xxx
-```
-
-图片请求会自动识别这些表达：
+在白名单私聊中发送：
 
 ```text
-画一张清晨山湖风景照
-生成一张赛博朋克城市海报
-/image a cinematic mountain lake at sunrise
+/n 今天陪孩子去公园了。
+/note 晚上散步三十分钟，状态不错。
 ```
 
-文字聊天和图片生成可以使用不同供应商。例如：`CODEX_MODE=openai_compatible` + `OPENAI_COMPAT_PROVIDER=qhaigc` 负责文字，`IMAGE_GENERATION_PROVIDER=xingwan` 负责生图。
-
-### 飞书语音和文字写入 Obsidian
-
-语音笔记只接受白名单中的机器人私聊。事件先持久化到本地队列，飞书回调会立即完成；后台随后下载音频、使用 whisper.cpp 本地转写、追加到当天的 Markdown，并回复保存结果。音频和转写临时文件处理后会删除，任务成功后队列记录不会保留正文。
-
-文字笔记使用同一份私聊白名单和持久化队列，不经过音频下载或转写。待处理或失败重试期间，正文仅保存在本机权限为 `0600` 的任务文件中，成功后会从任务记录中移除。发送以下任一命令即可：
-
-```text
-/note 今天陪孩子去公园了。
-/n 今天完成了半小时运动。
-```
-
-语音和文字按 `Asia/Shanghai` 时区合并到当天的同一个文件，不同时间的记录以二级标题区分：
+也可以直接发送语音。当天的内容会写成：
 
 ```markdown
-# 每日口述 2026-08-01
+# 每日口述 2026-08-26
 
 ## 09:15
 上午整理了今天的安排。
@@ -197,249 +58,130 @@ IMAGE_GENERATION_API_KEY=sk_xxx
 下午完成了半小时运动。
 ```
 
-语音转文字在 Mac 本地完成：飞书提供语音消息事件和音频文件，FFmpeg 负责转换音频格式，whisper.cpp 负责运行基于 OpenAI Whisper 的本地模型。当前没有文字转语音功能，也不会把语音正文发送到云端转写服务。
+需要让 Codex 处理任务时必须显式发送：
 
-安装本地依赖：
+```text
+/codex 总结这个项目最近的变更
+```
+
+菜单栏提供“打开今日笔记”“暂停 / 继续接收”“重新连接”“打开设置”和“退出”。关闭设置窗口不会停止后台连接。
+
+### 从 v0.1 源码版迁移
+
+首次启动会检查旧版 `com.kevin.feishu-codex` LaunchAgent。也可以在欢迎页手动选择原来的 `.env`：
+
+1. App 只把 `.env` 当作数据解析，不执行其中的 Shell 表达式。
+2. 页面先展示 App ID、Vault、目录和白名单等非敏感预览。
+3. 密钥转入 macOS 钥匙串；原 `.env` 以 `0600` 权限备份到应用数据目录。
+4. 完成飞书连接与 Obsidian 写入自检后，再由用户明确停用旧服务。
+
+新版验证成功前不会自动停用旧进程，以便回退；验证后应尽快停用旧服务，避免两个连接同时消费飞书消息。
+
+## 隐私与安全边界
+
+- 普通配置：`~/Library/Application Support/Feishu Codex/config.json`，schema 版本化、原子写入、权限 `0600`。
+- 密钥：macOS Keychain，界面只显示“已配置”，不回显完整值。
+- 模型和队列：`~/Library/Application Support/Feishu Codex/`。
+- 日志：`~/Library/Logs/Feishu Codex/`，限制长度并脱敏，不记录笔记正文或完整提示词。
+- 只处理配置允许名单内的飞书私聊；桌面模式拒绝空白名单启动。
+- Vault 目标在写入前解析真实路径，阻止 `..`、绝对相对目录和软链接逃逸。
+- 前端不能执行任意命令。Rust 只暴露固定命令，Tauri 只允许声明过的 Sidecar 和更新能力。
+- Codex 永不使用跳过 sandbox 或 approval 的危险参数。只读目录自动执行；可写目录每次在本机确认。
+- 语音由本机 FFmpeg 和 whisper.cpp 处理，不发送到云端语音识别服务。飞书仍负责提供消息事件与音频文件。
+
+更多信息见 [PRIVACY.md](./PRIVACY.md) 和 [SECURITY.md](./SECURITY.md)。
+
+## 桌面架构
+
+```text
+React / TypeScript UI
+        │ 固定 Tauri commands + events
+        ↓
+Rust main process
+  ├─ config / Keychain / path authorization
+  ├─ tray / autostart / updater / approval TTL
+  └─ versioned NDJSON over stdin/stdout
+        ↓
+Node Sidecar
+  ├─ Feishu long connection
+  ├─ persistent queue and deduplication
+  ├─ daily Markdown append
+  └─ fixed ffmpeg / whisper-cli / Codex adapters
+```
+
+协议只有三种消息：请求、响应和事件，当前 `version` 为 `1`。前端不访问本地端口；桌面 Sidecar 的健康检查仅绑定 loopback，并限制请求体大小。
+
+更完整的设计和威胁边界见 [docs/architecture.md](./docs/architecture.md)。
+
+## 从源码开发
+
+要求：Apple Silicon Mac、Node.js 22+、Rust stable、Xcode Command Line Tools、CMake。只有开发模式会借用本机 Homebrew 的 FFmpeg/whisper.cpp；Release 始终从固定版本源码构建最小化 Sidecar。
 
 ```bash
-brew install whisper-cpp ffmpeg
+npm ci
+npm run check
+cargo test --manifest-path desktop/src-tauri/Cargo.toml
+npm run tauri:dev
 ```
 
-从 whisper.cpp 官方模型仓库下载中文效果更好的量化模型：
+生成 Release 构建：
 
 ```bash
-mkdir -p models
-curl -L --fail --output models/ggml-large-v3-turbo-q5_0.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+npm run tauri:build
 ```
 
-配置示例：
+该命令会构建：
 
-```env
-VOICE_NOTES_ENABLED=true
-OBSIDIAN_VAULT_PATH=/Users/kevin/Documents/Obsidian Vault
-VOICE_NOTE_RELATIVE_DIR=00_Inbox/feishu/每日口述
-VOICE_NOTE_ALLOWED_CHAT_IDS=oc_xxx
-VOICE_NOTE_TIME_ZONE=Asia/Shanghai
-VOICE_NOTE_QUEUE_DIR=.data/voice-note-jobs
-VOICE_NOTE_LANGUAGE=zh
-VOICE_NOTE_INITIAL_PROMPT=这是一段飞书口述笔记，内容涉及 Obsidian、Codex、每周复盘和生活笔记。
-FFMPEG_COMMAND=/opt/homebrew/bin/ffmpeg
-WHISPER_COMMAND=/opt/homebrew/bin/whisper-cli
-WHISPER_MODEL_PATH=/absolute/path/to/models/ggml-large-v3-turbo-q5_0.bin
-```
+- `@yao-pkg/pkg` 打包的 Node 22 arm64 Sidecar；
+- 固定为 FFmpeg 9.0.1 的最小 LGPL 静态构建；
+- 固定为 whisper.cpp 1.9.2 的 arm64 静态构建；
+- Tauri `.app`、DMG 和带签名的更新包。
 
-`VOICE_NOTE_ALLOWED_CHAT_IDS` 必须显式配置；为空时所有语音都会被拒绝。当前仅接收私聊语音，群聊语音不会写入笔记。默认输出到：
-
-```text
-00_Inbox/feishu/每日口述/YYYY-MM-DD.md
-```
-
-飞书下载消息音频需要应用具有“获取单聊、群组消息”或等价权限。接口和 `type=file` 参数说明见飞书官方文档：
-
-https://open.feishu.cn/document/server-docs/im-v1/message/get-2?lang=zh-CN
-
-whisper.cpp 的安装、模型和 CLI 参数说明：
-
-https://github.com/ggml-org/whisper.cpp/blob/master/README.md
-
-3. 启动服务
-
-```bash
-node --env-file=.env src/server.mjs
-```
-
-4. 在飞书开放平台里把事件订阅方式切到“使用长连接接收事件”
-
-飞书后台保存时要求本地 bridge 已经在线，否则会提示应用未建立长连接。
-
-5. 飞书里发：
-
-私聊机器人时可以直接发：
-
-```text
-帮我总结今天这个仓库要做什么
-```
-
-群聊里建议发：
-
-```text
-@机器人 帮我总结今天这个仓库要做什么
-```
-
-也可以继续用显式命令：
-
-```text
-/codex 帮我总结今天这个仓库要做什么
-```
-
-把文字记入当天的 Obsidian 文件：
-
-```text
-/note 今天需要复盘和孩子沟通时的耐心。
-/n 晚上散步三十分钟，状态不错。
-```
-
-`/codex` 的作用是防止群聊里普通聊天误触发本地 Codex。默认 `FEISHU_TRIGGER_MODE=mention_or_prefix` 下，私聊无需前缀，群聊 `@机器人` 无需前缀，`/codex` 仍然可用。
-
-## 消息流转
-
-```text
-Feishu Long Connection
-  -> local bridge process
-  -> local Codex service
-  -> send message back to chat
-```
-
-## 本地 Codex 接口约定
-
-### `codex_exec` 模式
-
-bridge 会执行一条类似这样的命令：
-
-```bash
-codex exec --skip-git-repo-check -C /your/project-root --output-last-message /tmp/last-message.txt -
-```
-
-然后把飞书里的文本作为标准输入喂给 Codex，并把最后一条模型消息回发到飞书。
-
-这个模式最适合你现在这种本机已经能跑：
-
-```bash
-codex
-```
-
-或者：
-
-```bash
-codex exec "Summarize recent commits"
-```
-
-的场景，不需要 MCP。
-
-## 备用 webhook 模式
-
-如果你以后想切回 `ngrok + webhook`，在 `.env` 里改成：
-
-```env
-FEISHU_DELIVERY_MODE=webhook
-```
-
-然后把飞书事件订阅地址配置为：
-
-```text
-https://你的-ngrok-域名/webhook/feishu
-```
-
-### `http` 模式
-
-如果你用 `http` 模式，bridge 默认会发：
-
-```json
-{
-  "prompt": "用户输入的内容",
-  "source": "feishu",
-  "context": {
-    "chatId": "oc_xxx",
-    "messageId": "om_xxx",
-    "chatType": "p2p",
-    "text": "/codex hello",
-    "eventId": "evt_xxx",
-    "eventType": "im.message.receive_v1"
-  }
-}
-```
-
-你的本地服务返回以下任一字段即可：
-
-```json
-{ "reply": "..." }
-```
-
-```json
-{ "output": "..." }
-```
-
-```json
-{ "result": "..." }
-```
-
-或者直接返回纯文本。
-
-## 验证
+常用检查：
 
 ```bash
 npm run check
+cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+npm run licenses:generate
 ```
 
-## macOS 开机自启
-
-本机已配置用户登录后自动启动：
-
-```text
-/Users/kevin/Library/LaunchAgents/com.kevin.feishu-codex.plist
-```
-
-查看状态：
+旧的纯 Node 入口仍保留给开发者和迁移用户：
 
 ```bash
-launchctl print gui/$(id -u)/com.kevin.feishu-codex
+cp .env.example .env
+node --env-file=.env src/server.mjs
 ```
 
-重启服务：
+桌面版不会读取项目目录里的 `.env`，除非用户在迁移页面明确选择它。
 
-```bash
-launchctl kickstart -k gui/$(id -u)/com.kevin.feishu-codex
-```
+## 发布与版本管理
 
-停止并取消当前登录会话中的启动：
+项目遵循 Semantic Versioning。推送 `v0.2.*` 标签会触发 macOS arm64 发布流水线，生成 DMG、更新包、SHA-256、SPDX SBOM 和第三方许可证清单。流水线会先扫描完整 Git 历史中的密钥。
 
-```bash
-launchctl bootout gui/$(id -u) /Users/kevin/Library/LaunchAgents/com.kevin.feishu-codex.plist
-```
+更新包使用 Tauri 独立密钥签名。私钥只存在于维护者钥匙文件和 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY`；仓库中的公钥用于客户端验签。Beta 的 `latest.json` 会发布到固定 `desktop-beta` 更新通道。
 
-日志位置：
+稳定版还需要这些 GitHub Secrets：
 
-```text
-logs/launchd.out.log
-logs/launchd.err.log
-```
+- `APPLE_CERTIFICATE`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_SIGNING_IDENTITY`
+- `APPLE_ID`
+- `APPLE_PASSWORD`
+- `APPLE_TEAM_ID`
 
-## 版本管理
-
-项目使用 [Semantic Versioning](https://semver.org/)：
-
-- `MAJOR`：不兼容的配置、命令或存储格式变化。
-- `MINOR`：向后兼容的新能力。
-- `PATCH`：向后兼容的问题修复。
-- `0.x` 阶段用于验证产品方向；如必须调整配置约定，会在 [CHANGELOG.md](./CHANGELOG.md) 中提供迁移说明。
-- 每个正式版本从 `main` 的已验证提交创建 `vMAJOR.MINOR.PATCH` 标签和 GitHub Release，版本号以 Git 标签为准。
+没有 Apple Developer ID 时只能发布带 Gatekeeper 提示的测试版，不能把它描述为完整的一键安装。
 
 ## 路线图
 
-路线图表达方向，不承诺固定日期；每个版本仍以可独立使用、可安全回滚为发布门槛。
+- `v0.2.0-beta.1`：菜单栏骨架、Sidecar、配置 schema、Keychain、飞书测试和旧版迁移。
+- `v0.2.0-beta.2`：内置 FFmpeg/Whisper、模型下载、Vault 授权与文字/语音完整链路。
+- `v0.2.0-beta.3`：Codex 本机审批、图片配置、诊断、登录启动、更新和安装 QA。
+- `v0.2.0`：Developer ID 签名、公证后的首个普通用户稳定版。
+- `v0.3`：每周复盘、分类建议、模板与失败任务可视化重试。
+- `v0.4`：Universal Binary/Intel、更多模型与服务商、配置导入导出。
+- `v1.0`：稳定迁移与备份、兼容性承诺、安全审计和完整用户文档。
 
-### `v0.1`：可靠捕捉（当前版本）
+## 贡献与许可
 
-- 飞书语音本地转写与 `/note`、`/n` 文字记录。
-- 持久化队列、消息去重、同日单文件与分时记录。
-- Codex 文本助手、图片生成和 macOS 登录自启。
-
-### `v0.2`：更好复盘
-
-- 可配置的每日笔记模板和 Frontmatter。
-- 每周复盘索引与待归档提醒。
-- 在不自动移动原始记录的前提下，辅助建议家庭育儿、健康、技能学习或生活随笔分类。
-
-### `v0.3`：可运维与可分享
-
-- 一键安装、配置检查、升级与故障诊断。
-- 队列状态、失败重试和更清晰的本地运行指标。
-- Codex 高风险操作确认、发送者级白名单和并发控制。
-- 为公开发布补齐许可证选择、贡献指南和安全报告流程。
-
-### `v1.0`：稳定个人知识入口
-
-- 稳定的配置、命令和 Markdown 存储约定。
-- 可验证的升级与回滚流程，以及长期运行文档。
-- 在保持本地优先与开放格式的前提下，支持更多消息入口和知识库目标。
+欢迎 Issue 和 Pull Request。提交前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。项目使用 [MIT License](./LICENSE)；随 App 分发的第三方组件按各自许可发布，见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。

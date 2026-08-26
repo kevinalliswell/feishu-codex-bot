@@ -6,6 +6,7 @@ desktop/dist/
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/.generated/
+artifacts/
 models/*.bin
 *.log
 *.pem
