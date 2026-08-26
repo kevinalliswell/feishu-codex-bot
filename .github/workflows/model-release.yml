@@ -1,0 +1,35 @@
+name: Publish verified Whisper model
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      MODEL_NAME: ggml-large-v3-turbo-q5_0.bin
+      MODEL_SIZE: "574041195"
+      MODEL_SHA256: 394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2
+      MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Download and verify the immutable model asset
+        run: |
+          curl --fail --location --retry 5 --retry-all-errors --output "$MODEL_NAME" "$MODEL_URL"
+          test "$(wc -c < "$MODEL_NAME" | tr -d ' ')" = "$MODEL_SIZE"
+          printf '%s  %s\n' "$MODEL_SHA256" "$MODEL_NAME" | sha256sum --check --strict
+          printf '%s  %s\n' "$MODEL_SHA256" "$MODEL_NAME" > SHA256SUMS
+      - name: Publish the versioned model release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view models-v1 >/dev/null 2>&1 || gh release create models-v1 \
+            --target main \
+            --title "Feishu Codex Whisper Models v1" \
+            --notes "Verified whisper.cpp model used by desktop onboarding. The application enforces the published size and SHA-256 before installation."
+          gh release upload models-v1 "$MODEL_NAME#$MODEL_NAME" "SHA256SUMS#SHA256SUMS" --clobber
+          model_asset_size="$(gh release view models-v1 --json assets --jq ".assets[] | select(.name == \"$MODEL_NAME\") | .size")"
+          test "$model_asset_size" = "$MODEL_SIZE"
