@@ -56,6 +56,18 @@ fn validation_rejects_relative_codex_roots_and_vault_escape() {
 }
 
 #[test]
+fn validation_rejects_unsupported_config_schema_versions() {
+    let config = AppConfig {
+        version: 2,
+        ..AppConfig::default()
+    };
+
+    let errors = validate_config(&config);
+
+    assert!(errors.iter().any(|error| error.contains("schema version")));
+}
+
+#[test]
 fn write_approval_is_single_use_and_expires() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
     let mut approvals = ApprovalStore::default();

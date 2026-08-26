@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.mjs";
@@ -168,6 +168,54 @@ test("appendVoiceNote rejects paths outside the configured vault", async () => {
     }), /inside the Obsidian vault/);
   } finally {
     await rm(vaultPath, { recursive: true, force: true });
+  }
+});
+
+test("appendVoiceNote rejects a note directory symlink that escapes the vault", async () => {
+  const vaultPath = await mkdtemp(join(tmpdir(), "voice-note-vault-"));
+  const outsidePath = await mkdtemp(join(tmpdir(), "voice-note-outside-"));
+
+  try {
+    await mkdir(join(vaultPath, "00_Inbox"), { recursive: true });
+    await symlink(outsidePath, join(vaultPath, "00_Inbox", "feishu"));
+
+    await assert.rejects(() => appendVoiceNote({
+      vaultPath,
+      relativeDir: "00_Inbox/feishu",
+      transcript: "不应通过目录软链接写出 Vault",
+      messageId: "om_symlink_dir",
+      createdAtMs: Date.parse("2026-08-01T01:15:00.000Z"),
+      timeZone: "Asia/Shanghai"
+    }), /inside the Obsidian vault/);
+  } finally {
+    await rm(vaultPath, { recursive: true, force: true });
+    await rm(outsidePath, { recursive: true, force: true });
+  }
+});
+
+test("appendVoiceNote rejects an existing daily-note symlink", async () => {
+  const vaultPath = await mkdtemp(join(tmpdir(), "voice-note-vault-"));
+  const outsidePath = await mkdtemp(join(tmpdir(), "voice-note-outside-"));
+
+  try {
+    const noteDir = join(vaultPath, "00_Inbox/feishu/每日口述");
+    const outsideFile = join(outsidePath, "outside.md");
+    await mkdir(noteDir, { recursive: true });
+    await writeFile(outsideFile, "must remain unchanged", "utf8");
+    await symlink(outsideFile, join(noteDir, "2026-08-01.md"));
+
+    await assert.rejects(() => appendVoiceNote({
+      vaultPath,
+      relativeDir: "00_Inbox/feishu/每日口述",
+      transcript: "不应通过文件软链接写出 Vault",
+      messageId: "om_symlink_file",
+      createdAtMs: Date.parse("2026-08-01T01:15:00.000Z"),
+      timeZone: "Asia/Shanghai"
+    }), /regular file inside the Obsidian vault/);
+    assert.equal(await readFile(outsideFile, "utf8"), "must remain unchanged");
+  } finally {
+    await rm(vaultPath, { recursive: true, force: true });
+    await rm(outsidePath, { recursive: true, force: true });
   }
 });
 

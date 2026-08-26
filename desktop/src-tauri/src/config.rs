@@ -132,6 +132,9 @@ impl Default for AppConfig {
 
 pub fn validate_config(config: &AppConfig) -> Vec<String> {
     let mut errors = Vec::new();
+    if config.version != 1 {
+        errors.push("Unsupported config schema version".into());
+    }
     let relative_path = Path::new(&config.obsidian.relative_dir);
     if relative_path.is_absolute()
         || relative_path

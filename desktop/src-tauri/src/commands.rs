@@ -220,10 +220,14 @@ pub fn export_diagnostics(
     if !destination.is_absolute() {
         return Err("Diagnostic export path must be absolute".into());
     }
-    let parent = destination.parent().ok_or("Diagnostic export has no parent")?;
+    let parent = destination
+        .parent()
+        .ok_or("Diagnostic export has no parent")?;
     let canonical_parent = fs::canonicalize(parent)
         .map_err(|error| format!("Cannot access diagnostic export directory: {error}"))?;
-    let file_name = destination.file_name().ok_or("Diagnostic export needs a file name")?;
+    let file_name = destination
+        .file_name()
+        .ok_or("Diagnostic export needs a file name")?;
     let destination = canonical_parent.join(file_name);
     let report = build_diagnostics(&state)?;
     let payload = json!({
@@ -231,7 +235,10 @@ pub fn export_diagnostics(
         "appVersion": env!("CARGO_PKG_VERSION"),
         "diagnostics": report
     });
-    let temporary = canonical_parent.join(format!(".feishu-codex-diagnostics-{}.tmp", uuid::Uuid::new_v4()));
+    let temporary = canonical_parent.join(format!(
+        ".feishu-codex-diagnostics-{}.tmp",
+        uuid::Uuid::new_v4()
+    ));
     let mut file = OpenOptions::new()
         .create_new(true)
         .write(true)

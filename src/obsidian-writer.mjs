@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]{1,160}$/;
@@ -42,6 +43,61 @@ function resolveTargetDir(vaultPath, relativeDir) {
   }
 
   return targetDir;
+}
+
+function isInside(rootPath, candidatePath) {
+  const pathFromRoot = relative(rootPath, candidatePath);
+  return pathFromRoot === ""
+    || (!isAbsolute(pathFromRoot) && pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${sep}`));
+}
+
+async function resolveAuthorizedTargetDir(vaultPath, relativeDir) {
+  const targetDir = resolveTargetDir(vaultPath, relativeDir);
+  await mkdir(targetDir, { recursive: true });
+
+  const [realVault, realTarget] = await Promise.all([
+    realpath(vaultPath),
+    realpath(targetDir)
+  ]);
+  if (!isInside(realVault, realTarget)) {
+    throw new Error("Voice-note directory must be inside the Obsidian vault");
+  }
+  return realTarget;
+}
+
+async function readRegularFileWithoutFollowingLinks(filePath) {
+  let handle;
+  try {
+    handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) {
+      throw new Error("not a regular file");
+    }
+    return await handle.readFile("utf8");
+  } catch (error) {
+    throw new Error(`Daily note must be a regular file inside the Obsidian vault: ${error.message}`);
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function appendRegularFileWithoutFollowingLinks(filePath, contents) {
+  let handle;
+  try {
+    handle = await open(
+      filePath,
+      constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW
+    );
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) {
+      throw new Error("not a regular file");
+    }
+    await handle.writeFile(contents, "utf8");
+  } catch (error) {
+    throw new Error(`Daily note must be a regular file inside the Obsidian vault: ${error.message}`);
+  } finally {
+    await handle?.close();
+  }
 }
 
 function normalizeTranscript(transcript) {
@@ -90,12 +146,12 @@ export async function appendVoiceNote({
   }
 
   const normalizedTranscript = normalizeTranscript(transcript);
-  const targetDir = resolveTargetDir(vaultPath, relativeDir);
+  const displayTargetDir = resolveTargetDir(vaultPath, relativeDir);
+  const targetDir = await resolveAuthorizedTargetDir(vaultPath, relativeDir);
   const { date, time } = dateTimeParts(createdAtMs, timeZone);
   const filePath = join(targetDir, `${date}.md`);
+  const displayFilePath = join(displayTargetDir, `${date}.md`);
   const marker = `<!-- feishu-message-id: ${messageId} -->`;
-
-  await mkdir(targetDir, { recursive: true });
 
   try {
     await writeFile(filePath, initialContents(date), { encoding: "utf8", flag: "wx" });
@@ -105,9 +161,9 @@ export async function appendVoiceNote({
     }
   }
 
-  const existingContents = await readFile(filePath, "utf8");
+  const existingContents = await readRegularFileWithoutFollowingLinks(filePath);
   if (existingContents.includes(marker)) {
-    return { duplicate: true, filePath };
+    return { duplicate: true, filePath: displayFilePath };
   }
 
   const entry = [
@@ -119,6 +175,9 @@ export async function appendVoiceNote({
     ""
   ].join("\n");
 
-  await appendFile(filePath, `${existingContents.endsWith("\n") ? "" : "\n"}${entry}`, "utf8");
-  return { duplicate: false, filePath };
+  await appendRegularFileWithoutFollowingLinks(
+    filePath,
+    `${existingContents.endsWith("\n") ? "" : "\n"}${entry}`
+  );
+  return { duplicate: false, filePath: displayFilePath };
 }
